@@ -155,12 +155,12 @@ src/
 ├── index.ts                          # Entry point — wires everything
 ├── config.ts                         # Environment variable parsing
 ├── types.ts                          # Shared type definitions
-├── schemas.ts                        # Zod schemas (MCP + LCD responses)
+├── schemas.ts                        # Zod schemas (MCP + LCD + MarketSignal)
 ├── logger.ts                         # Pino structured JSON logger
 ├── mcp-client.ts                     # MCP client with retry + timeout
 ├── data-store.ts                     # Persistent JSON storage
 ├── alerts.ts                         # Alert manager with persistent dedup
-├── health-server.ts                  # HTTP /health and /state endpoints
+├── health-server.ts                  # HTTP /health, /state, /tuning-report, /signals endpoints
 ├── scheduler.ts                      # Poll loop + event integration + dedup
 ├── characters/
 │   └── market-monitor.character.ts   # AGENT-003 character definition
@@ -168,15 +168,67 @@ src/
 │   └── regen-market-plugin.ts        # Four OODA workflows
 ├── notifiers/
 │   └── telegram.ts                   # Telegram with escalation + digest
-└── chain/
-    ├── lcd-client.ts                 # Regen LCD REST queries
-    ├── event-watcher.ts              # Chain event poller
-    ├── proposal-builder.ts           # Freeze proposal construction
-    ├── proposal-submitter.ts         # On-chain tx signing (@cosmjs)
-    ├── approval-gate.ts              # Human approval gate (non-negotiable)
-    ├── telegram-commands.ts          # /approve, /reject, /pending handlers
-    └── audit-log.ts                  # Append-only JSONL audit trail
+├── chain/
+│   ├── lcd-client.ts                 # Regen LCD REST queries
+│   ├── event-watcher.ts              # Chain event poller
+│   ├── proposal-builder.ts           # Freeze proposal construction
+│   ├── proposal-submitter.ts         # On-chain tx signing (@cosmjs)
+│   ├── approval-gate.ts              # Human approval gate (non-negotiable)
+│   ├── telegram-commands.ts          # /approve, /reject, /pending handlers
+│   └── audit-log.ts                  # Append-only JSONL audit trail
+├── signals/
+│   ├── signal-store.ts               # In-memory + file-backed signal storage
+│   ├── signal-publisher.ts           # Multi-channel publisher (Redis, webhook, SSE)
+│   └── signal-emitter.ts             # Workflow → signal conversion
+├── server/
+│   └── signals-routes.ts             # HTTP routes for /signals endpoints
+└── tuner/
+    └── threshold-tuner.ts            # Self-tuning threshold analyzer
 ```
+
+## Multi-Agent Broadcasting
+
+Market Monitor is the market data backbone for the Regen agent ecosystem (AGENT-003 in the agentic-tokenomics spec). Every signal is versioned (`1.0`), schema-validated, and routed to specific downstream agents. Signals are published simultaneously to all configured channels.
+
+### Signal Types
+
+| Signal Type | Description | Target Agents | Priority |
+|---|---|---|---|
+| `PRICE_ANOMALY` | Z-score threshold crossed | AGENT-001, 002, 004 | WARNING |
+| `PRICE_MOVEMENT` | Price moved > threshold | AGENT-001, 002 | WARNING |
+| `LIQUIDITY_WARNING` | Health score degraded | AGENT-001, 002 | WARNING |
+| `LOW_SUPPLY` | Credits below threshold | AGENT-001 | WARNING |
+| `GOAL_COMPLETED` | Community goal hit 100% | AGENT-002 | INFO |
+| `CURATION_DEGRADED` | Quality score dropped | AGENT-001, 002 | WARNING |
+| `MARKET_REPORT` | Scheduled daily summary | AGENT-001, 002, 004 | INFO |
+| `MANIPULATION_ALERT` | Z-score >= 3.5, freeze triggered | AGENT-001, 002, 004 | CRITICAL |
+
+### Consuming Signals
+
+Three consumption patterns — full documentation is generated at startup in `data/SUBSCRIPTION_GUIDE.md`:
+- **Redis Streams** (recommended): `XREAD` from `regen:signals:AGENT-00X`
+- **Webhooks**: Register endpoint via `WEBHOOK_URLS` env var, optional HMAC-SHA256 signing
+- **REST polling**: `GET /signals?agent=AGENT-001&since=<timestamp>`
+
+### Publisher Configuration
+
+| Env Var | Enables | Required |
+|---|---|---|
+| `REDIS_URL` | Redis Streams publishing | No |
+| `WEBHOOK_URLS` | Webhook fan-out | No |
+| (none needed) | REST `/signals` endpoint | Always active |
+
+If neither `REDIS_URL` nor `WEBHOOK_URLS` is set, signals are stored locally and available via REST only.
+
+### Signal Endpoints
+
+| Endpoint | Description |
+|---|---|
+| `GET /signals` | List signals with optional filters (?type, ?severity, ?agent, ?since, ?limit) |
+| `GET /signals/:id` | Get a specific signal by UUID |
+| `GET /signals/stream` | Server-Sent Events — real-time signal stream |
+| `GET /signals/schema` | JSON Schema for the MarketSignal type |
+| `GET /signals/stats` | Publishing statistics and publisher status |
 
 ## Testing
 

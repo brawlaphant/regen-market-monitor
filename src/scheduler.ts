@@ -4,7 +4,7 @@ import { DataStore } from "./data-store.js";
 import { HealthServer } from "./health-server.js";
 import { TelegramNotifier } from "./notifiers/telegram.js";
 import { EventWatcher } from "./chain/event-watcher.js";
-import type { Config, AnomalyReport, LiquidityReport, RetirementReport, CurationReport, ChainEvent } from "./types.js";
+import type { Config, AnomalyReport, LiquidityReport, RetirementReport, CurationReport, ChainEvent, MarketSnapshot } from "./types.js";
 import type { Logger } from "./logger.js";
 
 /**
@@ -36,6 +36,9 @@ export class Scheduler {
   private startedAt = Date.now();
   private readonly ONE_DAY_MS = 24 * 60 * 60 * 1000;
   private lastDigestDay = -1;
+
+  /** Callback when daily digest completes — produces MARKET_REPORT signal */
+  public onDigestComplete: ((snapshot: MarketSnapshot | null) => Promise<void>) | null = null;
 
   /** Tracks running workflows to prevent duplicates */
   private runningWorkflows = new Set<string>();
@@ -264,6 +267,7 @@ export class Scheduler {
       const uptimeSeconds = Math.round((Date.now() - this.startedAt) / 1000);
       this.notifier
         .sendDigest(this.health.snapshot, this.alerts.alertsFiredToday, uptimeSeconds)
+        .then(() => this.onDigestComplete?.(this.health.snapshot))
         .catch((err) => this.logger.error({ err }, "Daily digest failed"));
     }
   }

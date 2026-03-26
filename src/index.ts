@@ -8,6 +8,9 @@ import { DataStore } from "./data-store.js";
 import { Scheduler } from "./scheduler.js";
 import { HealthServer } from "./health-server.js";
 import { TelegramNotifier } from "./notifiers/telegram.js";
+import { SignalStore } from "./signals/signal-store.js";
+import { SignalPublisher } from "./signals/signal-publisher.js";
+import { buildSubscriptionGuide } from "./signals/subscription-guide.js";
 import { ThresholdTuner } from "./tuner/threshold-tuner.js";
 import { LCDClient } from "./chain/lcd-client.js";
 import { EventWatcher } from "./chain/event-watcher.js";
@@ -41,15 +44,30 @@ async function main() {
   // Plugin with all four OODA workflows
   const plugin = new RegenMarketPlugin(mcp, store, logger);
 
-  // Alert manager with persistent deduplication
+  // ─── Signal Broadcasting Layer ────────────────────────────────────
+
+  const signalStore = new SignalStore(config.dataDir, logger);
+  const signalPublisher = new SignalPublisher(signalStore, logger);
+  await signalPublisher.init();
+
+  // Alert manager with persistent deduplication + signal production
   const alerts = new AlertManager(config, store, logger);
+  alerts.broadcastChannels = signalPublisher.configuredChannels;
+  alerts.onSignal = async (signal) => {
+    await signalPublisher.publish(signal);
+  };
 
   // Telegram notifier
   const notifier = new TelegramNotifier(config, logger);
   alerts.onAlert((alert) => notifier.sendAlert(alert));
 
-  // Health endpoint
+  // Health endpoint — serves /health, /state, /signals/*, /tuning-report
   const health = new HealthServer(config.port, logger);
+  health.signalStore = signalStore;
+  health.signalPublisher = signalPublisher;
+
+  // Generate subscription guide for downstream agent teams
+  buildSubscriptionGuide(config.dataDir, config.port, logger);
 
   // Threshold tuner — available via GET /tuning-report
   const tuner = new ThresholdTuner(config, logger);
@@ -57,17 +75,11 @@ async function main() {
 
   // ─── On-Chain Action Layer ────────────────────────────────────────
 
-  // LCD client for direct Regen chain queries
   const lcd = new LCDClient(config, logger);
-
-  // Audit log (append-only)
   const audit = new AuditLog(config.dataDir, logger);
-
-  // Proposal builder + submitter
   const builder = new ProposalBuilder(lcd, audit, config, logger);
   const submitter = new ProposalSubmitter(config, audit, logger);
 
-  // Initialize wallet if mnemonic is provided
   if (config.regenMnemonic) {
     try {
       await submitter.init();
@@ -79,17 +91,13 @@ async function main() {
     logger.warn("REGEN_MNEMONIC not set — proposal submission disabled (monitoring only)");
   }
 
-  // Approval gate
   const gate = new ApprovalGate(config, builder, submitter, audit, logger);
 
-  // Telegram command handler for /approve and /reject
   const bot = notifier.getBot();
   let commandHandler: TelegramCommandHandler | null = null;
   if (bot && config.telegramAdminChatId) {
     commandHandler = new TelegramCommandHandler(bot, gate, config, logger);
     commandHandler.start();
-
-    // Wire approval gate notifications through Telegram
     gate.onNotify(async (proposal, markdown) => {
       await commandHandler!.sendApprovalRequest(proposal, markdown);
     });
@@ -97,12 +105,10 @@ async function main() {
     logger.warn("Telegram admin chat not configured — proposal approval commands disabled");
   }
 
-  // Event watcher for real-time chain events
   const eventWatcher = new EventWatcher(lcd, config, logger);
 
   // ─── Wire the Scheduler ───────────────────────────────────────────
 
-  // Log character system prompt
   logger.info(
     { system: MarketMonitorCharacter.system.join(" ") },
     "Character loaded"
@@ -117,36 +123,50 @@ async function main() {
 
   // Wire the freeze proposal pipeline
   scheduler.onCriticalAnomaly = async (anomalyReport) => {
-    logger.info(
-      { z_score: anomalyReport.z_score },
-      "CRITICAL anomaly — initiating freeze proposal pipeline"
-    );
-
+    logger.info({ z_score: anomalyReport.z_score }, "CRITICAL anomaly — initiating freeze proposal pipeline");
     try {
       let orderIds: string[] = [];
       try {
         const orders = await lcd.getEcocreditSellOrders();
         orderIds = orders.slice(0, 10).map((o) => o.id);
-      } catch {
-        logger.warn("Could not fetch sell orders for proposal context");
-      }
+      } catch { logger.warn("Could not fetch sell orders for proposal context"); }
 
       const priceHistory = store.loadPriceHistory();
       const proposal = builder.buildFreezeProposal(anomalyReport, priceHistory, orderIds);
-
       const validation = await builder.validateProposal(proposal);
       if (!validation.valid) {
-        logger.warn(
-          { proposalId: proposal.id, reasons: validation.reasons, confidence: validation.confidence },
-          "Freeze proposal validation failed — not requesting approval"
-        );
+        logger.warn({ proposalId: proposal.id, reasons: validation.reasons }, "Freeze proposal validation failed");
         return;
       }
-
       await gate.requestApproval(proposal);
-    } catch (err) {
-      logger.error({ err }, "Freeze proposal pipeline failed");
-    }
+    } catch (err) { logger.error({ err }, "Freeze proposal pipeline failed"); }
+  };
+
+  // Wire MARKET_REPORT signal into scheduler's daily digest
+  scheduler.onDigestComplete = async (snapshot) => {
+    if (!snapshot) return;
+    try {
+      const { buildSignal } = await import("./signals/signal-factory.js");
+      const signal = buildSignal("MARKET_REPORT", {
+        regen_price_usd: snapshot.price?.price_usd ?? 0,
+        available_credits: snapshot.credits?.total_tradable ?? 0,
+        health_score: snapshot.liquidity?.health_score ?? 0,
+        active_goals: snapshot.communityGoals?.goals?.length ?? 0,
+        goals_completed_today: snapshot.communityGoals?.goals?.filter((g) => g.percent_complete >= 100).length ?? 0,
+        alerts_fired_today: alerts.alertsFiredToday,
+        period_start: new Date(Date.now() - 86400000).toISOString(),
+        period_end: new Date().toISOString(),
+      }, { triggered_by: "scheduled_poll", workflow_id: "daily-digest" }, signalPublisher.configuredChannels);
+      await signalPublisher.publish(signal);
+    } catch (err) { logger.warn({ err }, "Failed to produce MARKET_REPORT signal"); }
+  };
+
+  // Graceful shutdown — close SSE and Redis before exit
+  const origStop = scheduler.stop.bind(scheduler);
+  scheduler.stop = async (signal?: string) => {
+    signalPublisher.closeSseClients();
+    await signalPublisher.close();
+    await origStop(signal);
   };
 
   // Start everything
