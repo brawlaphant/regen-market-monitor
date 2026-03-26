@@ -4,6 +4,8 @@ import { DataStore } from "./data-store.js";
 import { HealthServer } from "./health-server.js";
 import { TelegramNotifier } from "./notifiers/telegram.js";
 import { EventWatcher } from "./chain/event-watcher.js";
+import type { CrossChainAggregator } from "./chain/cross-chain-aggregator.js";
+import type { ArbitrageDetector } from "./chain/arbitrage-detector.js";
 import type { Config, AnomalyReport, LiquidityReport, RetirementReport, CurationReport, ChainEvent, MarketSnapshot } from "./types.js";
 import type { Logger } from "./logger.js";
 
@@ -39,6 +41,12 @@ export class Scheduler {
 
   /** Callback when daily digest completes — produces MARKET_REPORT signal */
   public onDigestComplete: ((snapshot: MarketSnapshot | null) => Promise<void>) | null = null;
+
+  /** Cross-chain intelligence — set from index.ts */
+  public crossChainAggregator: CrossChainAggregator | null = null;
+  public arbitrageDetector: ArbitrageDetector | null = null;
+  /** Callback when cross-chain signals fire */
+  public onCrossChainSignal: ((type: string, data: Record<string, unknown>) => Promise<void>) | null = null;
 
   /** Tracks running workflows to prevent duplicates */
   private runningWorkflows = new Set<string>();
@@ -239,6 +247,47 @@ export class Scheduler {
           "Retirement analysis failed"
         );
         await this.alerts.emitMcpUnreachable("get_community_goals").catch(() => {});
+      }
+    }
+
+    // Cross-chain intelligence — runs every poll cycle
+    if (this.crossChainAggregator) {
+      try {
+        const ccSnapshot = await this.crossChainAggregator.fetchAll();
+        if (this.arbitrageDetector) {
+          const arb = this.arbitrageDetector.detectArbitrage(ccSnapshot);
+          if (arb) ccSnapshot.arbitrage_opportunity = arb;
+          // Emit cross-chain signals
+          if (arb && arb.profitable && arb.confidence !== "low" && this.onCrossChainSignal) {
+            await this.onCrossChainSignal("CROSS_CHAIN_ARBITRAGE", {
+              buy_venue: arb.buy_venue, sell_venue: arb.sell_venue,
+              buy_price_usd: arb.buy_price_usd, sell_price_usd: arb.sell_price_usd,
+              net_spread_pct: arb.net_spread_pct, recommended_size_usd: arb.recommended_size_usd,
+              bridge_path: arb.notes, expiry_estimate_minutes: arb.expiry_estimate_minutes,
+            });
+          }
+          // Venue divergence check
+          if (ccSnapshot.spread_pct > 5 && this.onCrossChainSignal) {
+            await this.onCrossChainSignal("VENUE_PRICE_DIVERGENCE", {
+              venue_a: ccSnapshot.best_ask_venue, venue_b: ccSnapshot.best_bid_venue,
+              price_a: ccSnapshot.venues.find(v => v.venue === ccSnapshot.best_ask_venue)?.price_usd ?? 0,
+              price_b: ccSnapshot.venues.find(v => v.venue === ccSnapshot.best_bid_venue)?.price_usd ?? 0,
+              divergence_pct: ccSnapshot.spread_pct,
+            });
+          }
+          // Bridge flow signal
+          if (ccSnapshot.bridge_flow.signal !== "neutral" && this.onCrossChainSignal) {
+            await this.onCrossChainSignal("BRIDGE_FLOW_SPIKE", {
+              direction: ccSnapshot.bridge_flow.signal,
+              net_regen_24h: ccSnapshot.bridge_flow.net_regen_24h,
+              net_usd_24h: ccSnapshot.bridge_flow.net_usd_24h,
+              tx_count_24h: ccSnapshot.bridge_flow.tx_count_24h,
+              largest_tx_amount: ccSnapshot.bridge_flow.largest_tx?.amount_regen ?? 0,
+            });
+          }
+        }
+      } catch (err) {
+        this.logger.error({ err: String(err) }, "Cross-chain fetch failed");
       }
     }
 

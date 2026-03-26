@@ -81,5 +81,12 @@ function computeSeverity(
     return "WARNING";
   }
 
+  if (type === "CROSS_CHAIN_ARBITRAGE") return "CRITICAL";
+  if (type === "VENUE_PRICE_DIVERGENCE" || type === "LIQUIDITY_MIGRATION") return "WARNING";
+  if (type === "BRIDGE_FLOW_SPIKE") {
+    const d = data as any;
+    return d.direction === "distribution" ? "WARNING" : "INFO";
+  }
+
   return "INFO";
 }
