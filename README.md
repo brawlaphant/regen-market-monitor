@@ -1,5 +1,7 @@
 # regen-market-monitor
 
+[![CI](https://github.com/brawlaphant/regen-market-monitor/actions/workflows/test.yml/badge.svg)](https://github.com/brawlaphant/regen-market-monitor/actions/workflows/test.yml)
+
 Autonomous ElizaOS agent that monitors Regen Network ecocredit market conditions. Implements **AGENT-003 (RegenMarketMonitor)** from the [Regen Network Agentic Tokenomics](https://github.com/regen-network/agentic-tokenomics) specification — four OODA-loop workflows that detect price anomalies, assess liquidity, analyze retirement patterns, and score curation quality, with configurable alerts delivered via Telegram.
 
 ## Quick Start
@@ -194,6 +196,40 @@ src/
 └── notifiers/
     └── telegram.ts                   # Telegram delivery with escalation + digest
 ```
+
+## Testing
+
+```bash
+npm test                # Run all tests
+npm run test:watch      # Watch mode
+npm run test:coverage   # Run with coverage report
+```
+
+147 tests covering z-score logic, alert thresholds, deduplication, persistence, schema validation, MCP retry logic, Telegram formatting, scheduler timing, and full integration cycles. All tests are isolated — no network calls, no writes to real `data/`.
+
+## Threshold Tuning
+
+After 7+ days of alert history, the self-tuning analyzer can suggest better thresholds:
+
+```bash
+# Print tuning report to stdout
+npm run tune
+
+# Or fetch via HTTP
+curl http://localhost:3099/tuning-report
+```
+
+The tuner classifies each threshold's alert rate: `< 0.5/day` = TOO_LOOSE, `0.5-3/day` = HEALTHY, `> 3/day` = TOO_NOISY. For noisy thresholds it suggests 15% tightening; for loose ones, 15% loosening.
+
+The tuner **never auto-applies**. Suggested values are written to `data/tuning-applied.json` only when explicitly approved via `applyTuning(report, true)`. The daily digest includes a note when the tuner is ready.
+
+## CI
+
+GitHub Actions runs on every push and PR to main:
+- TypeScript type check (`tsc --noEmit`)
+- Full test suite with coverage (`vitest run --coverage`)
+- Node.js 20.x and 22.x matrix
+- Coverage thresholds: Lines 75%, Functions 80%, Branches 70%
 
 ## Spec Reference
 

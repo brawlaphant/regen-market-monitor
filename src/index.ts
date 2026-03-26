@@ -8,6 +8,7 @@ import { DataStore } from "./data-store.js";
 import { Scheduler } from "./scheduler.js";
 import { HealthServer } from "./health-server.js";
 import { TelegramNotifier } from "./notifiers/telegram.js";
+import { ThresholdTuner } from "./tuner/threshold-tuner.js";
 import { loadConfig } from "./config.js";
 import { createLogger } from "./logger.js";
 
@@ -42,6 +43,10 @@ async function main() {
 
   // Health endpoint
   const health = new HealthServer(config.port, logger);
+
+  // Threshold tuner — available via GET /tuning-report
+  const tuner = new ThresholdTuner(config, logger);
+  health.tuningAnalyzer = () => tuner.analyze();
 
   // Log character system prompt
   logger.info(
