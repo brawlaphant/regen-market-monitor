@@ -1,4 +1,11 @@
 import { McpClient } from "../mcp-client.js";
+import { DataStore } from "../data-store.js";
+import {
+  SupplyHealthSchema,
+  RegenPriceSchema,
+  AvailableCreditsResultSchema,
+  CommunityGoalsResultSchema,
+} from "../schemas.js";
 import type {
   SupplyHealth,
   RegenPrice,
@@ -10,8 +17,11 @@ import type {
   RetirementReport,
   CurationReport,
   AvailableCredit,
+  MarketSnapshot,
 } from "../types.js";
 import type { Logger } from "../logger.js";
+
+const MIN_Z_SCORE_POINTS = 5;
 
 /**
  * Regen Market Plugin — implements the four AGENT-003 OODA workflows.
@@ -21,66 +31,113 @@ import type { Logger } from "../logger.js";
  *   WF-MM-02: assessLiquidity
  *   WF-MM-03: analyzeRetirements
  *   WF-MM-04: scoreCurationQuality
+ *
+ * All MCP responses are validated through Zod schemas (#1).
+ * Independent MCP calls use Promise.all (#7).
+ * Price history persists to disk (#4).
  */
 export class RegenMarketPlugin {
   private mcp: McpClient;
   private logger: Logger;
-  private priceHistory: PriceSnapshot[] = [];
-  private readonly MAX_HISTORY = 168; // 7 days at hourly polls
+  private store: DataStore;
+  private priceHistory: PriceSnapshot[];
+  private readonly MAX_HISTORY = 24;
 
-  constructor(mcpClient: McpClient, logger: Logger) {
+  /** Last raw MCP results for market snapshot */
+  public lastPrice: RegenPrice | null = null;
+  public lastSupplyHealth: SupplyHealth | null = null;
+  public lastCredits: AvailableCreditsResult | null = null;
+  public lastGoals: CommunityGoalsResult | null = null;
+
+  constructor(mcpClient: McpClient, store: DataStore, logger: Logger) {
     this.mcp = mcpClient;
+    this.store = store;
     this.logger = logger;
+    this.priceHistory = store.loadPriceHistory();
+    this.logger.info(
+      { loaded_points: this.priceHistory.length },
+      "Price history loaded from disk"
+    );
+  }
+
+  /** Persist current price history to disk */
+  flushPriceHistory(): void {
+    this.store.savePriceHistory(this.priceHistory);
   }
 
   // ─── WF-MM-01: Price Anomaly Detection ────────────────────────────
-  //
-  // Trigger: SellOrderCreated / SellOrderFilled / scheduled
-  // Observe: get_regen_price + browse_available_credits
-  // Orient:  z-score vs rolling median
-  // Decide:  <2.0 normal, 2.0–3.5 watchlist, ≥3.5 flagged
-  // Act:     return report for alert manager
 
   async detectPriceAnomaly(): Promise<AnomalyReport> {
+    const start = Date.now();
     this.logger.info("WF-MM-01: Detecting price anomalies");
 
-    // OBSERVE
+    // OBSERVE — parallel MCP calls (#7)
     const [priceRes, creditsRes] = await Promise.all([
       this.mcp.callTool("get_regen_price"),
       this.mcp.callTool("browse_available_credits"),
     ]);
 
-    const price = McpClient.parseJson<RegenPrice>(priceRes);
-    const credits = McpClient.parseJson<AvailableCreditsResult>(creditsRes);
+    // VALIDATE (#1)
+    const priceResult = McpClient.parseAndValidate(priceRes, RegenPriceSchema);
+    if (!priceResult.success) {
+      this.logger.error(
+        { workflow: "WF-MM-01", tool: "get_regen_price", error: priceResult.error, raw: priceResult.raw },
+        "Schema validation failed"
+      );
+      throw new Error(`get_regen_price validation failed: ${priceResult.error}`);
+    }
+    // Validate credits too but don't block anomaly detection if it fails
+    const creditsResult = McpClient.parseAndValidate(creditsRes, AvailableCreditsResultSchema);
+    if (!creditsResult.success) {
+      this.logger.warn(
+        { workflow: "WF-MM-01", tool: "browse_available_credits", error: creditsResult.error, raw: creditsResult.raw },
+        "Credits schema validation failed (non-blocking for price anomaly)"
+      );
+    } else {
+      this.lastCredits = creditsResult.data;
+    }
 
-    // Record snapshot
+    const price = priceResult.data;
+    this.lastPrice = price;
+
+    // Record snapshot and persist (#4)
     const snapshot: PriceSnapshot = {
       price_usd: price.price_usd,
-      timestamp: new Date(),
+      timestamp: new Date().toISOString(),
     };
     this.priceHistory.push(snapshot);
     if (this.priceHistory.length > this.MAX_HISTORY) {
       this.priceHistory.shift();
     }
+    this.store.savePriceHistory(this.priceHistory);
 
-    // ORIENT — z-score against rolling median
-    const median = this.computeMedian(
-      this.priceHistory.map((s) => s.price_usd)
-    );
-    const stdDev = this.computeStdDev(
-      this.priceHistory.map((s) => s.price_usd),
-      median
-    );
-    const zScore = stdDev > 0 ? Math.abs(price.price_usd - median) / stdDev : 0;
+    const prices = this.priceHistory.map((s) => s.price_usd);
 
-    // DECIDE
-    let status: "normal" | "watchlist" | "flagged";
-    if (zScore >= 3.5) {
-      status = "flagged";
-    } else if (zScore >= 2.0) {
-      status = "watchlist";
+    // ORIENT — z-score vs rolling median (#4: min 5 data points)
+    let zScore: number;
+    let status: AnomalyReport["status"];
+
+    if (prices.length < MIN_Z_SCORE_POINTS) {
+      // Fall back to percentage-change comparison
+      zScore = 0;
+      status = "insufficient_data";
+      this.logger.info(
+        { data_points: prices.length, min_required: MIN_Z_SCORE_POINTS },
+        "Insufficient data for z-score, using percentage-change fallback"
+      );
     } else {
-      status = "normal";
+      const median = computeMedian(prices);
+      const stdDev = computeStdDev(prices, median);
+      zScore = stdDev > 0 ? Math.abs(price.price_usd - median) / stdDev : 0;
+
+      // DECIDE
+      if (zScore >= 3.5) {
+        status = "flagged";
+      } else if (zScore >= 2.0) {
+        status = "watchlist";
+      } else {
+        status = "normal";
+      }
     }
 
     const previousPrice =
@@ -94,7 +151,7 @@ export class RegenMarketPlugin {
 
     const report: AnomalyReport = {
       current_price: price.price_usd,
-      median_price: median,
+      median_price: computeMedian(prices),
       z_score: zScore,
       status,
       price_change_pct: changePercent,
@@ -102,7 +159,7 @@ export class RegenMarketPlugin {
     };
 
     this.logger.info(
-      { z_score: zScore.toFixed(2), status, price: price.price_usd },
+      { z_score: zScore.toFixed(2), status, price: price.price_usd, duration_ms: Date.now() - start },
       "WF-MM-01 complete"
     );
 
@@ -110,26 +167,40 @@ export class RegenMarketPlugin {
   }
 
   // ─── WF-MM-02: Liquidity Monitoring ───────────────────────────────
-  //
-  // Trigger: Every 1 hour or significant trade (>$10k)
-  // Observe: check_supply_health + browse_available_credits
-  // Orient:  listed value, spread, depth, health score
-  // Decide:  generate report with health assessment
-  // Act:     return report for alert manager
 
   async assessLiquidity(): Promise<LiquidityReport> {
+    const start = Date.now();
     this.logger.info("WF-MM-02: Assessing market liquidity");
 
-    // OBSERVE
+    // OBSERVE — parallel (#7)
     const [healthRes, creditsRes] = await Promise.all([
       this.mcp.callTool("check_supply_health"),
       this.mcp.callTool("browse_available_credits"),
     ]);
 
-    const health = McpClient.parseJson<SupplyHealth>(healthRes);
-    const credits = McpClient.parseJson<AvailableCreditsResult>(creditsRes);
+    // VALIDATE (#1)
+    const healthResult = McpClient.parseAndValidate(healthRes, SupplyHealthSchema);
+    if (!healthResult.success) {
+      this.logger.error(
+        { workflow: "WF-MM-02", tool: "check_supply_health", error: healthResult.error, raw: healthResult.raw },
+        "Schema validation failed"
+      );
+      throw new Error(`check_supply_health validation failed: ${healthResult.error}`);
+    }
+    const creditsResult = McpClient.parseAndValidate(creditsRes, AvailableCreditsResultSchema);
+    if (!creditsResult.success) {
+      this.logger.error(
+        { workflow: "WF-MM-02", tool: "browse_available_credits", error: creditsResult.error, raw: creditsResult.raw },
+        "Schema validation failed"
+      );
+      throw new Error(`browse_available_credits validation failed: ${creditsResult.error}`);
+    }
 
-    // ORIENT + DECIDE
+    const health = healthResult.data;
+    const credits = creditsResult.data;
+    this.lastSupplyHealth = health;
+    this.lastCredits = credits;
+
     const report: LiquidityReport = {
       listed_value_usd: credits.total_listed_value_usd,
       total_tradable: credits.total_tradable,
@@ -144,6 +215,7 @@ export class RegenMarketPlugin {
         health_score: report.health_score,
         available: report.available_credits,
         listed_value: report.listed_value_usd,
+        duration_ms: Date.now() - start,
       },
       "WF-MM-02 complete"
     );
@@ -152,26 +224,40 @@ export class RegenMarketPlugin {
   }
 
   // ─── WF-MM-03: Retirement Pattern Analysis ────────────────────────
-  //
-  // Trigger: MsgRetire event / daily scheduled
-  // Observe: get_community_goals
-  // Orient:  retirement metrics, demand signals
-  // Decide:  update demand index
-  // Act:     return report for alert manager
 
   async analyzeRetirements(): Promise<RetirementReport> {
+    const start = Date.now();
     this.logger.info("WF-MM-03: Analyzing retirement patterns");
 
-    // OBSERVE
+    // OBSERVE — parallel (#7)
     const [goalsRes, healthRes] = await Promise.all([
       this.mcp.callTool("get_community_goals"),
       this.mcp.callTool("check_supply_health"),
     ]);
 
-    const goalsData = McpClient.parseJson<CommunityGoalsResult>(goalsRes);
-    const health = McpClient.parseJson<SupplyHealth>(healthRes);
+    // VALIDATE (#1)
+    const goalsResult = McpClient.parseAndValidate(goalsRes, CommunityGoalsResultSchema);
+    if (!goalsResult.success) {
+      this.logger.error(
+        { workflow: "WF-MM-03", tool: "get_community_goals", error: goalsResult.error, raw: goalsResult.raw },
+        "Schema validation failed"
+      );
+      throw new Error(`get_community_goals validation failed: ${goalsResult.error}`);
+    }
+    const healthResult = McpClient.parseAndValidate(healthRes, SupplyHealthSchema);
+    if (!healthResult.success) {
+      this.logger.error(
+        { workflow: "WF-MM-03", tool: "check_supply_health", error: healthResult.error, raw: healthResult.raw },
+        "Schema validation failed"
+      );
+      throw new Error(`check_supply_health validation failed: ${healthResult.error}`);
+    }
 
-    // ORIENT — extract demand signals
+    const goalsData = goalsResult.data;
+    const health = healthResult.data;
+    this.lastGoals = goalsData;
+    this.lastSupplyHealth = health;
+
     const goals = goalsData.goals || [];
     const completedGoals = goals.filter((g) => g.percent_complete >= 100);
     const avgCompletion =
@@ -201,6 +287,7 @@ export class RegenMarketPlugin {
         demand_signal: demandSignal,
         completed_goals: completedGoals.length,
         total_retired: health.retired_credits,
+        duration_ms: Date.now() - start,
       },
       "WF-MM-03 complete"
     );
@@ -209,38 +296,48 @@ export class RegenMarketPlugin {
   }
 
   // ─── WF-MM-04: Curation Quality Scoring ───────────────────────────
-  //
-  // Trigger: SellOrderCreated / daily refresh
-  // Observe: browse_available_credits + check_supply_health
-  // Orient:  weighted quality factors → score 0–1000
-  // Decide:  flag degradation if score < collection floor
-  // Act:     return report for alert manager
 
   async scoreCurationQuality(): Promise<CurationReport> {
+    const start = Date.now();
     this.logger.info("WF-MM-04: Scoring curation quality");
 
-    // OBSERVE
+    // OBSERVE — parallel (#7)
     const [creditsRes, healthRes] = await Promise.all([
       this.mcp.callTool("browse_available_credits"),
       this.mcp.callTool("check_supply_health"),
     ]);
 
-    const credits = McpClient.parseJson<AvailableCreditsResult>(creditsRes);
-    const health = McpClient.parseJson<SupplyHealth>(healthRes);
+    // VALIDATE (#1)
+    const creditsResult = McpClient.parseAndValidate(creditsRes, AvailableCreditsResultSchema);
+    if (!creditsResult.success) {
+      this.logger.error(
+        { workflow: "WF-MM-04", tool: "browse_available_credits", error: creditsResult.error, raw: creditsResult.raw },
+        "Schema validation failed"
+      );
+      throw new Error(`browse_available_credits validation failed: ${creditsResult.error}`);
+    }
+    const healthResult = McpClient.parseAndValidate(healthRes, SupplyHealthSchema);
+    if (!healthResult.success) {
+      this.logger.error(
+        { workflow: "WF-MM-04", tool: "check_supply_health", error: healthResult.error, raw: healthResult.raw },
+        "Schema validation failed"
+      );
+      throw new Error(`check_supply_health validation failed: ${healthResult.error}`);
+    }
 
-    // ORIENT — compute weighted quality factors
+    const credits = creditsResult.data;
+    const health = healthResult.data;
+    this.lastCredits = credits;
+    this.lastSupplyHealth = health;
+
     const factors: Record<string, number> = {
-      supply_health: this.normalizeScore(health.health_score, 100),
-      credit_diversity: this.normalizeScore(
-        health.credit_classes.length * 50,
-        500
-      ),
-      listing_depth: this.normalizeScore(credits.credits.length * 20, 1000),
-      vintage_freshness: this.computeVintageFreshness(credits.credits),
-      price_fairness: this.computePriceFairness(credits.credits),
+      supply_health: normalizeScore(health.health_score, 100),
+      credit_diversity: normalizeScore(health.credit_classes.length * 50, 500),
+      listing_depth: normalizeScore(credits.credits.length * 20, 1000),
+      vintage_freshness: computeVintageFreshness(credits.credits),
+      price_fairness: computePriceFairness(credits.credits),
     };
 
-    // Weighted combination (weights from spec factors)
     const weights: Record<string, number> = {
       supply_health: 0.25,
       credit_diversity: 0.15,
@@ -255,12 +352,8 @@ export class RegenMarketPlugin {
     }
     qualityScore = Math.round(qualityScore);
 
-    // DECIDE — flag degraded batches
     const degradedBatches = credits.credits
-      .filter((c) => {
-        const freshness = this.computeSingleVintageFreshness(c);
-        return freshness < 200; // low freshness threshold
-      })
+      .filter((c) => computeSingleVintageFreshness(c) < 200)
       .map((c) => c.batch_denom);
 
     const report: CurationReport = {
@@ -271,73 +364,85 @@ export class RegenMarketPlugin {
     };
 
     this.logger.info(
-      { quality_score: qualityScore, degraded_count: degradedBatches.length },
+      { quality_score: qualityScore, degraded_count: degradedBatches.length, duration_ms: Date.now() - start },
       "WF-MM-04 complete"
     );
 
     return report;
   }
 
-  // ─── Helpers ──────────────────────────────────────────────────────
-
-  private computeMedian(values: number[]): number {
-    if (values.length === 0) return 0;
-    const sorted = [...values].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 === 0
-      ? (sorted[mid - 1] + sorted[mid]) / 2
-      : sorted[mid];
+  /** Build a MarketSnapshot from last known data */
+  buildSnapshot(
+    anomaly: AnomalyReport | null,
+    liquidity: LiquidityReport | null,
+    retirement: RetirementReport | null,
+    curation: CurationReport | null,
+    pollDurationMs: number
+  ): MarketSnapshot {
+    return {
+      price: this.lastPrice ?? undefined,
+      supplyHealth: this.lastSupplyHealth ?? undefined,
+      credits: this.lastCredits ?? undefined,
+      communityGoals: this.lastGoals ?? undefined,
+      anomaly: anomaly ?? undefined,
+      liquidity: liquidity ?? undefined,
+      retirement: retirement ?? undefined,
+      curation: curation ?? undefined,
+      lastPollAt: new Date().toISOString(),
+      pollDurationMs,
+    };
   }
+}
 
-  private computeStdDev(values: number[], mean: number): number {
-    if (values.length < 2) return 0;
-    const variance =
-      values.reduce((sum, v) => sum + (v - mean) ** 2, 0) /
-      (values.length - 1);
-    return Math.sqrt(variance);
-  }
+// ─── Pure helpers (no class state) ──────────────────────────────────
 
-  /** Normalize a raw value to 0–1000 scale */
-  private normalizeScore(value: number, maxExpected: number): number {
-    return Math.min(1000, Math.round((value / maxExpected) * 1000));
-  }
+function computeMedian(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
+}
 
-  /** Average vintage freshness across all credits (0–1000 scale, 10-year window) */
-  private computeVintageFreshness(credits: AvailableCredit[]): number {
-    if (credits.length === 0) return 500;
-    const scores = credits.map((c) => this.computeSingleVintageFreshness(c));
-    return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
-  }
+function computeStdDev(values: number[], mean: number): number {
+  if (values.length < 2) return 0;
+  const variance =
+    values.reduce((sum, v) => sum + (v - mean) ** 2, 0) /
+    (values.length - 1);
+  return Math.sqrt(variance);
+}
 
-  /** Single credit vintage freshness: linear decay over 10-year window */
-  private computeSingleVintageFreshness(credit: AvailableCredit): number {
-    if (!credit.vintage_start) return 500;
-    const vintageDate = new Date(credit.vintage_start);
-    const ageMs = Date.now() - vintageDate.getTime();
-    const ageYears = ageMs / (365.25 * 24 * 60 * 60 * 1000);
-    const TEN_YEARS = 10;
-    const freshness = Math.max(0, 1 - ageYears / TEN_YEARS);
-    return Math.round(freshness * 1000);
-  }
+function normalizeScore(value: number, maxExpected: number): number {
+  return Math.min(1000, Math.round((value / maxExpected) * 1000));
+}
 
-  /** Price fairness: how tight are prices within each class (0–1000) */
-  private computePriceFairness(credits: AvailableCredit[]): number {
-    const priced = credits.filter(
-      (c) => c.ask_price_usd !== undefined && c.ask_price_usd > 0
-    );
-    if (priced.length < 2) return 700; // not enough data, assume fair
+function computeVintageFreshness(credits: AvailableCredit[]): number {
+  if (credits.length === 0) return 500;
+  const scores = credits.map((c) => computeSingleVintageFreshness(c));
+  return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+}
 
-    const prices = priced.map((c) => c.ask_price_usd!);
-    const median = this.computeMedian(prices);
-    if (median === 0) return 700;
+function computeSingleVintageFreshness(credit: AvailableCredit): number {
+  if (!credit.vintage_start) return 500;
+  const vintageDate = new Date(credit.vintage_start);
+  const ageMs = Date.now() - vintageDate.getTime();
+  const ageYears = ageMs / (365.25 * 24 * 60 * 60 * 1000);
+  const freshness = Math.max(0, 1 - ageYears / 10);
+  return Math.round(freshness * 1000);
+}
 
-    // Average absolute deviation from median as fraction
-    const avgDeviation =
-      prices.reduce((sum, p) => sum + Math.abs(p - median) / median, 0) /
-      prices.length;
-
-    // Low deviation = high fairness
-    const fairness = Math.max(0, 1 - avgDeviation * 2);
-    return Math.round(fairness * 1000);
-  }
+function computePriceFairness(credits: AvailableCredit[]): number {
+  const priced = credits.filter(
+    (c) => c.ask_price_usd !== undefined && c.ask_price_usd > 0
+  );
+  if (priced.length < 2) return 700;
+  const prices = priced.map((c) => c.ask_price_usd!);
+  const median = computeMedian(prices);
+  if (median === 0) return 700;
+  const avgDeviation =
+    prices.reduce((sum, p) => sum + Math.abs(p - median) / median, 0) /
+    prices.length;
+  const fairness = Math.max(0, 1 - avgDeviation * 2);
+  return Math.round(fairness * 1000);
 }

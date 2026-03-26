@@ -9,6 +9,14 @@ export interface MarketAlert {
   body: string;
   data: Record<string, unknown>;
   timestamp: Date;
+  /** Delta from last poll for the primary metric */
+  delta?: string;
+  /** Trend indicator over last 3 polls (e.g. "↑↑↓") */
+  trend?: string;
+  /** Link to Regen Network explorer */
+  explorerUrl?: string;
+  /** Minutes until next check */
+  nextCheckMinutes?: number;
 }
 
 /** Result from the regen-compute check_supply_health MCP tool */
@@ -73,10 +81,10 @@ export interface CommunityGoalsResult {
   goals: CommunityGoal[];
 }
 
-/** Price snapshot for rolling history */
+/** Price snapshot for rolling history — serializable to JSON */
 export interface PriceSnapshot {
   price_usd: number;
-  timestamp: Date;
+  timestamp: string; // ISO string for JSON persistence
 }
 
 /** Liquidity assessment output */
@@ -94,7 +102,7 @@ export interface AnomalyReport {
   current_price: number;
   median_price: number;
   z_score: number;
-  status: "normal" | "watchlist" | "flagged";
+  status: "normal" | "watchlist" | "flagged" | "insufficient_data";
   price_change_pct: number;
   timestamp: Date;
 }
@@ -126,15 +134,11 @@ export interface Config {
   priceMoveThreshold: number;
   alertCooldownMs: number;
   logLevel: string;
-}
-
-/** MCP tool call request */
-export interface McpToolCall {
-  method: "tools/call";
-  params: {
-    name: string;
-    arguments?: Record<string, unknown>;
-  };
+  port: number;
+  dailyDigestHourUtc: number;
+  dataDir: string;
+  mcpTimeoutMs: number;
+  mcpRetryAttempts: number;
 }
 
 /** MCP tool call response */
@@ -144,4 +148,35 @@ export interface McpToolResponse {
     text?: string;
   }>;
   isError?: boolean;
+}
+
+/** Persisted alert state for deduplication across restarts */
+export interface PersistedAlertState {
+  lastFired: Record<string, number>; // title -> epoch ms
+  alertsFiredToday: number;
+  dayStart: number; // epoch ms of start of current day
+}
+
+/** Full market snapshot written after each poll */
+export interface MarketSnapshot {
+  price?: RegenPrice;
+  supplyHealth?: SupplyHealth;
+  credits?: AvailableCreditsResult;
+  communityGoals?: CommunityGoalsResult;
+  anomaly?: AnomalyReport;
+  liquidity?: LiquidityReport;
+  retirement?: RetirementReport;
+  curation?: CurationReport;
+  lastPollAt: string; // ISO
+  pollDurationMs: number;
+}
+
+/** Health endpoint response */
+export interface HealthResponse {
+  status: "ok" | "degraded" | "starting";
+  lastPollAt: string | null;
+  nextPollAt: string | null;
+  mcpReachable: boolean;
+  alertsFiredToday: number;
+  uptime: number;
 }
