@@ -146,6 +146,18 @@ export interface Config {
   largeTradeThresholdUsd: number;
   proposalExpiryMs: number;
   telegramAdminChatId?: string;
+  // Cross-chain intelligence
+  osmosisLcdUrl: string;
+  axelarApiUrl: string;
+  baseRpcUrl: string;
+  celoRpcUrl: string;
+  coingeckoCacheTtlMs: number;
+  arbitDetectionThreshold: number;
+  arbitMinProfitPct: number;
+  flowAccumulationThreshold: number;
+  flowDistributionThreshold: number;
+  crossChainTimeoutMs: number;
+  venueDiscoveryTtlDays: number;
 }
 
 /** MCP tool call response */

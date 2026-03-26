@@ -5,6 +5,8 @@ import { handleSignalRoutes } from "./server/signals-routes.js";
 import type { SignalStore } from "./signals/signal-store.js";
 import type { SignalPublisher } from "./signals/signal-publisher.js";
 import type { TuningReport } from "./tuner/threshold-tuner.js";
+import type { CrossChainAggregator } from "./chain/cross-chain-aggregator.js";
+import type { ArbitrageDetector } from "./chain/arbitrage-detector.js";
 
 /**
  * HTTP server exposing health, state, signal, and tuning endpoints.
@@ -25,6 +27,9 @@ export class HealthServer {
   public snapshot: MarketSnapshot | null = null;
   /** Tuning analyzer function, set from index.ts */
   public tuningAnalyzer: (() => TuningReport) | null = null;
+  /** Cross-chain intelligence, set from index.ts */
+  public crossChainAggregator: CrossChainAggregator | null = null;
+  public arbitrageDetector: ArbitrageDetector | null = null;
 
   /** Signal infrastructure — set from index.ts after init */
   public signalStore: SignalStore | null = null;
@@ -45,6 +50,21 @@ export class HealthServer {
         if (handleSignalRoutes(req, res, this.signalStore, this.signalPublisher, this.logger)) {
           return;
         }
+      }
+
+      // Cross-chain routes
+      if (req.url === "/cross-chain/snapshot" && this.crossChainAggregator) {
+        const snap = this.crossChainAggregator.getLastSnapshot();
+        this.jsonResponse(res, snap ? 200 : 503, snap || { error: "no data yet" });
+        return;
+      }
+      if (req.url === "/cross-chain/history" && this.crossChainAggregator) {
+        this.jsonResponse(res, 200, this.crossChainAggregator.loadHistory().slice(-168));
+        return;
+      }
+      if (req.url === "/cross-chain/arbitrage" && this.arbitrageDetector) {
+        this.jsonResponse(res, 200, this.arbitrageDetector.getRecentDetections(10));
+        return;
       }
 
       if (req.url === "/health") {
@@ -130,6 +150,11 @@ export class HealthServer {
     const report = this.tuningAnalyzer();
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(report, null, 2));
+  }
+
+  private jsonResponse(res: http.ServerResponse, status: number, body: unknown): void {
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(body, null, 2));
   }
 
   close(): Promise<void> {

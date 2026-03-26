@@ -19,6 +19,8 @@ import { ProposalSubmitter } from "./chain/proposal-submitter.js";
 import { ApprovalGate } from "./chain/approval-gate.js";
 import { TelegramCommandHandler } from "./chain/telegram-commands.js";
 import { AuditLog } from "./chain/audit-log.js";
+import { CrossChainAggregator } from "./chain/cross-chain-aggregator.js";
+import { ArbitrageDetector } from "./chain/arbitrage-detector.js";
 import { loadConfig } from "./config.js";
 import { createLogger } from "./logger.js";
 
@@ -73,6 +75,14 @@ async function main() {
   const tuner = new ThresholdTuner(config, logger);
   health.tuningAnalyzer = () => tuner.analyze();
 
+  // ─── Cross-Chain Intelligence Layer ──────────────────────────────
+
+  const crossChain = new CrossChainAggregator(config.dataDir, logger);
+  await crossChain.init();
+  const arbDetector = new ArbitrageDetector(logger);
+  health.crossChainAggregator = crossChain;
+  health.arbitrageDetector = arbDetector;
+
   // ─── On-Chain Action Layer ────────────────────────────────────────
 
   const lcd = new LCDClient(config, logger);
@@ -120,6 +130,17 @@ async function main() {
 
   // Subscribe to chain events
   scheduler.subscribeToEvents(eventWatcher);
+
+  // Wire cross-chain intelligence
+  scheduler.crossChainAggregator = crossChain;
+  scheduler.arbitrageDetector = arbDetector;
+  scheduler.onCrossChainSignal = async (type, data) => {
+    try {
+      const { buildSignal } = await import("./signals/signal-factory.js");
+      const signal = buildSignal(type as any, data as any, { triggered_by: "scheduled_poll", workflow_id: "cross-chain" }, signalPublisher.configuredChannels);
+      await signalPublisher.publish(signal);
+    } catch (err) { logger.warn({ err, type }, "Cross-chain signal publish failed"); }
+  };
 
   // Wire the freeze proposal pipeline
   scheduler.onCriticalAnomaly = async (anomalyReport) => {

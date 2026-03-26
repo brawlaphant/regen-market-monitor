@@ -202,6 +202,10 @@ Market Monitor is the market data backbone for the Regen agent ecosystem (AGENT-
 | `CURATION_DEGRADED` | Quality score dropped | AGENT-001, 002 | WARNING |
 | `MARKET_REPORT` | Scheduled daily summary | AGENT-001, 002, 004 | INFO |
 | `MANIPULATION_ALERT` | Z-score >= 3.5, freeze triggered | AGENT-001, 002, 004 | CRITICAL |
+| `CROSS_CHAIN_ARBITRAGE` | Profitable spread across venues | AGENT-001, 002, 004 | CRITICAL |
+| `BRIDGE_FLOW_SPIKE` | Unusual bridge inflow/outflow | AGENT-001, 002, 004 | WARNING |
+| `VENUE_PRICE_DIVERGENCE` | Prices diverging > 5% across venues | AGENT-001, 002 | WARNING |
+| `LIQUIDITY_MIGRATION` | Liquidity shifting between venues | AGENT-001, 002 | WARNING |
 
 ### Consuming Signals
 
@@ -229,6 +233,31 @@ If neither `REDIS_URL` nor `WEBHOOK_URLS` is set, signals are stored locally and
 | `GET /signals/stream` | Server-Sent Events — real-time signal stream |
 | `GET /signals/schema` | JSON Schema for the MarketSignal type |
 | `GET /signals/stats` | Publishing statistics and publisher status |
+| `GET /cross-chain/snapshot` | Latest cross-chain price snapshot |
+| `GET /cross-chain/history` | Last 168 entries of cross-chain history |
+| `GET /cross-chain/arbitrage` | Last 10 arbitrage detections |
+
+## Cross-Chain Intelligence
+
+The agent monitors REGEN across 5 venues on 4 chains:
+
+| Venue | Chain | Source | Confidence |
+|---|---|---|---|
+| Regen Native | regen-1 | LCD + MCP tools | High |
+| Osmosis DEX | osmosis-1 | GAMM pool query | High |
+| Hydrex (primary Base) | Base | Hydrex API — WETH/REGEN pool | High |
+| Aerodrome (secondary Base) | Base | CoinGecko tickers / DeFiLlama | Medium |
+| CoinGecko | Aggregated | REST API | Low |
+
+**Arbitrage signals**: When a profitable spread is detected across venues (net > 1% after bridge/gas/swap fees), a `CROSS_CHAIN_ARBITRAGE` signal fires. Cost model estimates IBC transfer (~$0.01, 15min), Axelar bridge (~$3, 5min), DEX swap fees (0.2-0.3%), and slippage (0.5% per $1000). Signals are informational — bridge/swap execution requires independent tooling.
+
+**Bridge flow signals**: Tracks REGEN transfers via Axelar. Heavy outflow = distribution (sell pressure); heavy inflow = accumulation (buy pressure). Threshold: 10,000 REGEN net.
+
+**Hydrex epoch signals**: Tracks HYDX ve-model emissions directed to the REGEN pool. Epoch transition warnings fire < 6h before flip. Vote trend changes > 20% trigger emission shift signals. APR spikes > 50% trigger LP incentive signals.
+
+**Venue discovery**: The agent discovers all pool IDs and contract addresses dynamically at startup via CoinGecko platforms API and Osmosis IBC denom traces. No hardcoded addresses. Cache refreshes every 7 days.
+
+> Arbitrage signals are informational. Always verify prices on-chain before acting.
 
 ## Testing
 

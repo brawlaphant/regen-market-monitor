@@ -65,6 +65,8 @@ const AgentIdSchema = z.enum(["AGENT-001", "AGENT-002", "AGENT-003", "AGENT-004"
 const SignalTypeSchema = z.enum([
   "PRICE_ANOMALY", "PRICE_MOVEMENT", "LIQUIDITY_WARNING", "LOW_SUPPLY",
   "GOAL_COMPLETED", "CURATION_DEGRADED", "MARKET_REPORT", "MANIPULATION_ALERT",
+  "CROSS_CHAIN_ARBITRAGE", "BRIDGE_FLOW_SPIKE", "VENUE_PRICE_DIVERGENCE", "LIQUIDITY_MIGRATION",
+  "HYDX_EPOCH_TRANSITION", "EMISSION_SHIFT", "LP_INCENTIVE_SPIKE",
 ]);
 
 const BroadcastChannelSchema = z.enum(["redis", "webhook", "rest"]);
@@ -112,10 +114,52 @@ export const ManipulationAlertDataSchema = z.object({
   proposal_status: z.string().optional(),
 });
 
+export const CrossChainArbitrageDataSchema = z.object({
+  buy_venue: z.string(), sell_venue: z.string(),
+  buy_price_usd: z.number(), sell_price_usd: z.number(),
+  net_spread_pct: z.number(), recommended_size_usd: z.number(),
+  bridge_path: z.string(), expiry_estimate_minutes: z.number(),
+});
+
+export const BridgeFlowSpikeDataSchema = z.object({
+  direction: z.enum(["accumulation", "distribution"]),
+  net_regen_24h: z.number(), net_usd_24h: z.number(),
+  tx_count_24h: z.number(), largest_tx_amount: z.number(),
+});
+
+export const VenuePriceDivergenceDataSchema = z.object({
+  venue_a: z.string(), venue_b: z.string(),
+  price_a: z.number(), price_b: z.number(), divergence_pct: z.number(),
+});
+
+export const LiquidityMigrationDataSchema = z.object({
+  from_venue: z.string(), to_venue: z.string(),
+  liquidity_change_pct: z.number(), current_liquidity_usd: z.number(),
+});
+
+export const HydxEpochTransitionDataSchema = z.object({
+  current_epoch: z.number(), hours_until_flip: z.number(),
+  votes_toward_regen: z.number(), vote_trend: z.string(),
+  vote_change_pct: z.number(), combined_apr_pct: z.number(), action: z.string(),
+});
+
+export const EmissionShiftDataSchema = z.object({
+  votes_previous: z.number(), votes_current: z.number(),
+  change_pct: z.number(), direction: z.string(), incentive_apr_pct: z.number(),
+});
+
+export const LpIncentiveSpikeDataSchema = z.object({
+  previous_apr_pct: z.number(), current_apr_pct: z.number(),
+  increase_pct: z.number(), tvl_usd: z.number(),
+});
+
 const SignalDataSchema = z.union([
   PriceAnomalyDataSchema, PriceMovementDataSchema, LiquidityWarningDataSchema,
   LowSupplyDataSchema, GoalCompletedDataSchema, CurationDegradedDataSchema,
   MarketReportDataSchema, ManipulationAlertDataSchema,
+  CrossChainArbitrageDataSchema, BridgeFlowSpikeDataSchema,
+  VenuePriceDivergenceDataSchema, LiquidityMigrationDataSchema,
+  HydxEpochTransitionDataSchema, EmissionShiftDataSchema, LpIncentiveSpikeDataSchema,
 ]);
 
 const SignalContextSchema = z.object({

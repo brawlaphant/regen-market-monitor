@@ -10,6 +10,13 @@ export const SIGNAL_TYPES = [
   "CURATION_DEGRADED",
   "MARKET_REPORT",
   "MANIPULATION_ALERT",
+  "CROSS_CHAIN_ARBITRAGE",
+  "BRIDGE_FLOW_SPIKE",
+  "VENUE_PRICE_DIVERGENCE",
+  "LIQUIDITY_MIGRATION",
+  "HYDX_EPOCH_TRANSITION",
+  "EMISSION_SHIFT",
+  "LP_INCENTIVE_SPIKE",
 ] as const;
 export type SignalType = (typeof SIGNAL_TYPES)[number];
 
@@ -84,6 +91,65 @@ export interface ManipulationAlertData {
   proposal_status?: string;
 }
 
+export interface CrossChainArbitrageData {
+  buy_venue: string;
+  sell_venue: string;
+  buy_price_usd: number;
+  sell_price_usd: number;
+  net_spread_pct: number;
+  recommended_size_usd: number;
+  bridge_path: string;
+  expiry_estimate_minutes: number;
+}
+
+export interface BridgeFlowSpikeData {
+  direction: "accumulation" | "distribution";
+  net_regen_24h: number;
+  net_usd_24h: number;
+  tx_count_24h: number;
+  largest_tx_amount: number;
+}
+
+export interface VenuePriceDivergenceData {
+  venue_a: string;
+  venue_b: string;
+  price_a: number;
+  price_b: number;
+  divergence_pct: number;
+}
+
+export interface LiquidityMigrationData {
+  from_venue: string;
+  to_venue: string;
+  liquidity_change_pct: number;
+  current_liquidity_usd: number;
+}
+
+export interface HydxEpochTransitionData {
+  current_epoch: number;
+  hours_until_flip: number;
+  votes_toward_regen: number;
+  vote_trend: string;
+  vote_change_pct: number;
+  combined_apr_pct: number;
+  action: string;
+}
+
+export interface EmissionShiftData {
+  votes_previous: number;
+  votes_current: number;
+  change_pct: number;
+  direction: string;
+  incentive_apr_pct: number;
+}
+
+export interface LpIncentiveSpikeData {
+  previous_apr_pct: number;
+  current_apr_pct: number;
+  increase_pct: number;
+  tvl_usd: number;
+}
+
 export type SignalData =
   | PriceAnomalyData
   | PriceMovementData
@@ -92,7 +158,14 @@ export type SignalData =
   | GoalCompletedData
   | CurationDegradedData
   | MarketReportData
-  | ManipulationAlertData;
+  | ManipulationAlertData
+  | CrossChainArbitrageData
+  | BridgeFlowSpikeData
+  | VenuePriceDivergenceData
+  | LiquidityMigrationData
+  | HydxEpochTransitionData
+  | EmissionShiftData
+  | LpIncentiveSpikeData;
 
 export interface SignalContext {
   triggered_by: "scheduled_poll" | "event_watcher" | "manual";
@@ -131,6 +204,13 @@ export const ROUTING_TABLE: Record<SignalType, AgentId[]> = {
   CURATION_DEGRADED: ["AGENT-001", "AGENT-002"],
   MARKET_REPORT: ["AGENT-001", "AGENT-002", "AGENT-004"],
   MANIPULATION_ALERT: ["AGENT-001", "AGENT-002", "AGENT-004"],
+  CROSS_CHAIN_ARBITRAGE: ["AGENT-001", "AGENT-002", "AGENT-004"],
+  BRIDGE_FLOW_SPIKE: ["AGENT-001", "AGENT-002", "AGENT-004"],
+  VENUE_PRICE_DIVERGENCE: ["AGENT-001", "AGENT-002"],
+  LIQUIDITY_MIGRATION: ["AGENT-001", "AGENT-002"],
+  HYDX_EPOCH_TRANSITION: ["AGENT-001", "AGENT-002"],
+  EMISSION_SHIFT: ["AGENT-001", "AGENT-002"],
+  LP_INCENTIVE_SPIKE: ["AGENT-001", "AGENT-002", "AGENT-004"],
 };
 
 /** TTL values by signal_type (seconds) */
@@ -143,6 +223,13 @@ export const TTL_TABLE: Record<SignalType, number> = {
   CURATION_DEGRADED: 3600,
   MARKET_REPORT: 86400,
   MANIPULATION_ALERT: 3600,
+  CROSS_CHAIN_ARBITRAGE: 1800,
+  BRIDGE_FLOW_SPIKE: 3600,
+  VENUE_PRICE_DIVERGENCE: 1800,
+  LIQUIDITY_MIGRATION: 3600,
+  HYDX_EPOCH_TRANSITION: 21600, // 6h — lasts until epoch flips
+  EMISSION_SHIFT: 3600,
+  LP_INCENTIVE_SPIKE: 3600,
 };
 
 export interface PublishStatus {

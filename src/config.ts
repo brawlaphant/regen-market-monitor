@@ -33,5 +33,17 @@ export function loadConfig(): Config {
     largeTradeThresholdUsd: parseFloat(process.env.LARGE_TRADE_THRESHOLD_USD || "10000"),
     proposalExpiryMs: parseInt(process.env.PROPOSAL_EXPIRY_MS || "3600000", 10),
     telegramAdminChatId: process.env.TELEGRAM_ADMIN_CHAT_ID || undefined,
+    // Cross-chain intelligence
+    osmosisLcdUrl: process.env.OSMOSIS_LCD_URL || "https://lcd.osmosis.zone",
+    axelarApiUrl: process.env.AXELAR_API_URL || "https://api.axelarscan.io",
+    baseRpcUrl: process.env.BASE_RPC_URL || "https://mainnet.base.org",
+    celoRpcUrl: process.env.CELO_RPC_URL || "https://forno.celo.org",
+    coingeckoCacheTtlMs: parseInt(process.env.COINGECKO_CACHE_TTL_MS || "300000", 10),
+    arbitDetectionThreshold: parseFloat(process.env.ARBIT_DETECTION_THRESHOLD || "2.0"),
+    arbitMinProfitPct: parseFloat(process.env.ARBIT_MIN_PROFIT_PCT || "1.0"),
+    flowAccumulationThreshold: parseFloat(process.env.FLOW_ACCUMULATION_THRESHOLD || "10000"),
+    flowDistributionThreshold: parseFloat(process.env.FLOW_DISTRIBUTION_THRESHOLD || "10000"),
+    crossChainTimeoutMs: parseInt(process.env.CROSS_CHAIN_TIMEOUT_MS || "30000", 10),
+    venueDiscoveryTtlDays: parseInt(process.env.VENUE_DISCOVERY_TTL_DAYS || "7", 10),
   };
 }
