@@ -11,6 +11,8 @@
     "lint": "eslint src/"
   },
   "dependencies": {
+    "@cosmjs/proto-signing": "^0.32.4",
+    "@cosmjs/stargate": "^0.32.4",
     "dotenv": "^16.4.7",
     "node-telegram-bot-api": "^0.66.0",
     "pino": "^9.6.0",
