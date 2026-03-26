@@ -10,10 +10,11 @@ const SEVERITY_EMOJI: Record<string, string> = {
 
 /**
  * Telegram notifier with:
- * - Richer alert messages with delta, trend, explorer links, next-check footer (#11)
- * - Critical escalation: CRITICAL alerts sent twice with 60s gap (#13)
- * - Daily digest at configured UTC hour (#12)
+ * - Richer alert messages with delta, trend, explorer links, next-check footer
+ * - Critical escalation: CRITICAL alerts sent twice with 60s gap
+ * - Daily digest at configured UTC hour
  * - Console fallback when Telegram not configured
+ * - Exposes bot instance for command handler integration
  */
 export class TelegramNotifier {
   private bot: TelegramBot | null = null;
@@ -25,10 +26,12 @@ export class TelegramNotifier {
     this.logger = logger;
 
     if (config.telegramBotToken && config.telegramChatId) {
-      this.bot = new TelegramBot(config.telegramBotToken, { polling: false });
+      // Enable polling if admin chat ID is set (for command handler)
+      const polling = !!config.telegramAdminChatId;
+      this.bot = new TelegramBot(config.telegramBotToken, { polling });
       this.chatId = config.telegramChatId;
       this.useFallback = false;
-      this.logger.info("Telegram notifier configured");
+      this.logger.info({ polling }, "Telegram notifier configured");
     } else {
       this.useFallback = true;
       this.logger.warn(
@@ -37,12 +40,15 @@ export class TelegramNotifier {
     }
   }
 
-  /** Send a formatted alert. CRITICAL alerts get sent twice with 60s gap (#13). */
+  /** Get the underlying bot instance for command handler integration */
+  getBot(): TelegramBot | null {
+    return this.bot;
+  }
+
   async sendAlert(alert: MarketAlert): Promise<void> {
     const message = this.formatAlert(alert);
     await this.send(message);
 
-    // Critical escalation (#13)
     if (alert.severity === "CRITICAL") {
       this.logger.info({ alert_id: alert.id }, "Critical escalation: resending in 60s");
       setTimeout(async () => {
@@ -54,7 +60,6 @@ export class TelegramNotifier {
     }
   }
 
-  /** Send the daily digest (#12) */
   async sendDigest(
     snapshot: MarketSnapshot | null,
     alertsFiredToday: number,
@@ -101,7 +106,6 @@ export class TelegramNotifier {
 
   private async send(message: string): Promise<void> {
     if (this.useFallback || !this.bot || !this.chatId) {
-      // Strip HTML tags for console readability
       const plain = message.replace(/<[^>]+>/g, "");
       this.logger.info({ telegram_fallback: true }, plain);
       return;
@@ -120,7 +124,6 @@ export class TelegramNotifier {
     }
   }
 
-  /** Format an alert with enriched fields (#11) */
   private formatAlert(alert: MarketAlert): string {
     const emoji = SEVERITY_EMOJI[alert.severity] || "";
     const time = alert.timestamp.toISOString().replace("T", " ").slice(0, 19);
@@ -136,24 +139,20 @@ export class TelegramNotifier {
       alert.body,
     ];
 
-    // Delta from last poll (#11)
     if (alert.delta) {
       parts.push(`\u0394 ${alert.delta}`);
     }
 
-    // Trend indicator (#11)
     if (alert.trend) {
       parts.push(`Trend: ${alert.trend}`);
     }
 
     parts.push(``, `<pre>${dataLines}</pre>`);
 
-    // Explorer link (#11)
     if (alert.explorerUrl) {
       parts.push(``, `\ud83d\udd17 <a href="${alert.explorerUrl}">View on Regen Network</a>`);
     }
 
-    // Next check footer (#11)
     if (alert.nextCheckMinutes) {
       parts.push(`\u23f0 Next check in ${alert.nextCheckMinutes} minutes`);
     }
