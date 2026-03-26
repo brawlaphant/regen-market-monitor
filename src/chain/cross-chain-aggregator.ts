@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { OsmosisClient } from "./venues/osmosis-client.js";
+import { HydrexClient } from "./venues/hydrex-client.js";
+import type { HydrexVenueData } from "./venues/hydrex-client.js";
 import { AerodromeClient } from "./venues/aerodrome-client.js";
 import { CoinGeckoClient } from "./venues/coingecko-client.js";
 import { AxelarClient } from "./venues/axelar-client.js";
@@ -8,7 +10,7 @@ import type { BridgeFlowSnapshot } from "./venues/axelar-client.js";
 import { VenueDiscovery } from "./venue-discovery.js";
 import type { Logger } from "../logger.js";
 
-export type VenueId = "regen_native" | "osmosis" | "aerodrome_base" | "uniswap_celo" | "coingecko";
+export type VenueId = "regen_native" | "osmosis" | "hydrex_base" | "aerodrome_base" | "uniswap_celo" | "coingecko";
 
 export interface VenuePrice {
   venue: VenueId;
@@ -57,6 +59,7 @@ const MAX_HISTORY = 168; // 7 days hourly
  */
 export class CrossChainAggregator {
   private osmosis: OsmosisClient;
+  private hydrex: HydrexClient;
   private aerodrome: AerodromeClient;
   private coingecko: CoinGeckoClient;
   private axelar: AxelarClient;
@@ -66,6 +69,8 @@ export class CrossChainAggregator {
   private snapshotPath: string;
   private historyPath: string;
   private lastSnapshot: CrossChainSnapshot | null = null;
+  /** Last Hydrex data — exposed for epoch/emission signal checks */
+  public lastHydrexData: HydrexVenueData | null = null;
 
   constructor(dataDir: string, logger: Logger) {
     this.dataDir = dataDir;
@@ -75,6 +80,7 @@ export class CrossChainAggregator {
 
     const osmosisLcd = process.env.OSMOSIS_LCD_URL || "https://lcd.osmosis.zone";
     this.osmosis = new OsmosisClient(osmosisLcd, logger);
+    this.hydrex = new HydrexClient(logger);
     this.aerodrome = new AerodromeClient(logger);
     this.coingecko = new CoinGeckoClient(logger);
     this.axelar = new AxelarClient(logger);
@@ -85,7 +91,9 @@ export class CrossChainAggregator {
     const contracts = await this.discovery.refreshIfStale();
     if (contracts.osmosis_pool_id) this.osmosis.setCachedPoolId(contracts.osmosis_pool_id);
     if (contracts.regen_contract_base) this.aerodrome.setCachedContract(contracts.regen_contract_base);
-    this.logger.info("CrossChainAggregator initialized");
+    // Hydrex discovers its own pool dynamically
+    await this.hydrex.discoverREGENPool();
+    this.logger.info("CrossChainAggregator initialized (with Hydrex primary)");
   }
 
   async fetchAll(): Promise<CrossChainSnapshot> {
@@ -93,8 +101,9 @@ export class CrossChainAggregator {
     this.logger.info("Fetching cross-chain prices from all venues...");
 
     // Fire all venue queries with Promise.allSettled
-    const [osmosisResult, aerodromeResult, coingeckoResult, bridgeResult] = await Promise.allSettled([
+    const [osmosisResult, hydrexResult, aerodromeResult, coingeckoResult, bridgeResult] = await Promise.allSettled([
       this.fetchOsmosis(),
+      this.fetchHydrex(),
       this.fetchAerodrome(),
       this.fetchCoinGecko(),
       this.axelar.getFlowSnapshot(24),
@@ -105,7 +114,13 @@ export class CrossChainAggregator {
     if (osmosisResult.status === "fulfilled" && osmosisResult.value) {
       venues.push(osmosisResult.value);
     } else {
-      this.logger.warn({ venue: "osmosis", error: osmosisResult.status === "rejected" ? String(osmosisResult.reason) : "null" }, "Osmosis fetch failed");
+      this.logger.warn({ venue: "osmosis" }, "Osmosis fetch failed");
+    }
+
+    if (hydrexResult.status === "fulfilled" && hydrexResult.value) {
+      venues.push(hydrexResult.value);
+    } else {
+      this.logger.warn({ venue: "hydrex_base" }, "Hydrex fetch failed");
     }
 
     if (aerodromeResult.status === "fulfilled" && aerodromeResult.value) {
@@ -184,6 +199,21 @@ export class CrossChainAggregator {
     };
   }
 
+  private async fetchHydrex(): Promise<VenuePrice | null> {
+    const data = await this.hydrex.getVenueData();
+    if (!data || data.price_usd <= 0) return null;
+    this.lastHydrexData = data;
+    return {
+      venue: "hydrex_base",
+      price_usd: data.price_usd,
+      volume_24h_usd: data.volume_24h_usd,
+      liquidity_usd: data.tvl_usd,
+      last_updated: new Date().toISOString(),
+      source_url: "https://hydrex.fi",
+      confidence: "high", // direct on-chain pool query
+    };
+  }
+
   private async fetchAerodrome(): Promise<VenuePrice | null> {
     const data = await this.aerodrome.getVenueData();
     if (!data || data.price_usd <= 0) return null;
@@ -194,7 +224,7 @@ export class CrossChainAggregator {
       liquidity_usd: data.liquidity_usd,
       last_updated: new Date().toISOString(),
       source_url: "https://aerodrome.finance",
-      confidence: "medium", // via CoinGecko tickers
+      confidence: "medium", // secondary — via CoinGecko tickers
     };
   }
 

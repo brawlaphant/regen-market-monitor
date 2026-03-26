@@ -14,6 +14,9 @@ export const SIGNAL_TYPES = [
   "BRIDGE_FLOW_SPIKE",
   "VENUE_PRICE_DIVERGENCE",
   "LIQUIDITY_MIGRATION",
+  "HYDX_EPOCH_TRANSITION",
+  "EMISSION_SHIFT",
+  "LP_INCENTIVE_SPIKE",
 ] as const;
 export type SignalType = (typeof SIGNAL_TYPES)[number];
 
@@ -122,6 +125,31 @@ export interface LiquidityMigrationData {
   current_liquidity_usd: number;
 }
 
+export interface HydxEpochTransitionData {
+  current_epoch: number;
+  hours_until_flip: number;
+  votes_toward_regen: number;
+  vote_trend: string;
+  vote_change_pct: number;
+  combined_apr_pct: number;
+  action: string;
+}
+
+export interface EmissionShiftData {
+  votes_previous: number;
+  votes_current: number;
+  change_pct: number;
+  direction: string;
+  incentive_apr_pct: number;
+}
+
+export interface LpIncentiveSpikeData {
+  previous_apr_pct: number;
+  current_apr_pct: number;
+  increase_pct: number;
+  tvl_usd: number;
+}
+
 export type SignalData =
   | PriceAnomalyData
   | PriceMovementData
@@ -134,7 +162,10 @@ export type SignalData =
   | CrossChainArbitrageData
   | BridgeFlowSpikeData
   | VenuePriceDivergenceData
-  | LiquidityMigrationData;
+  | LiquidityMigrationData
+  | HydxEpochTransitionData
+  | EmissionShiftData
+  | LpIncentiveSpikeData;
 
 export interface SignalContext {
   triggered_by: "scheduled_poll" | "event_watcher" | "manual";
@@ -177,6 +208,9 @@ export const ROUTING_TABLE: Record<SignalType, AgentId[]> = {
   BRIDGE_FLOW_SPIKE: ["AGENT-001", "AGENT-002", "AGENT-004"],
   VENUE_PRICE_DIVERGENCE: ["AGENT-001", "AGENT-002"],
   LIQUIDITY_MIGRATION: ["AGENT-001", "AGENT-002"],
+  HYDX_EPOCH_TRANSITION: ["AGENT-001", "AGENT-002"],
+  EMISSION_SHIFT: ["AGENT-001", "AGENT-002"],
+  LP_INCENTIVE_SPIKE: ["AGENT-001", "AGENT-002", "AGENT-004"],
 };
 
 /** TTL values by signal_type (seconds) */
@@ -193,6 +227,9 @@ export const TTL_TABLE: Record<SignalType, number> = {
   BRIDGE_FLOW_SPIKE: 3600,
   VENUE_PRICE_DIVERGENCE: 1800,
   LIQUIDITY_MIGRATION: 3600,
+  HYDX_EPOCH_TRANSITION: 21600, // 6h — lasts until epoch flips
+  EMISSION_SHIFT: 3600,
+  LP_INCENTIVE_SPIKE: 3600,
 };
 
 export interface PublishStatus {

@@ -245,13 +245,15 @@ The agent monitors REGEN across 5 venues on 4 chains:
 |---|---|---|---|
 | Regen Native | regen-1 | LCD + MCP tools | High |
 | Osmosis DEX | osmosis-1 | GAMM pool query | High |
-| Aerodrome | Base | CoinGecko tickers / DeFiLlama | Medium |
-| Uniswap V3 | Celo | CoinGecko tickers | Medium |
+| Hydrex (primary Base) | Base | Hydrex API — WETH/REGEN pool | High |
+| Aerodrome (secondary Base) | Base | CoinGecko tickers / DeFiLlama | Medium |
 | CoinGecko | Aggregated | REST API | Low |
 
 **Arbitrage signals**: When a profitable spread is detected across venues (net > 1% after bridge/gas/swap fees), a `CROSS_CHAIN_ARBITRAGE` signal fires. Cost model estimates IBC transfer (~$0.01, 15min), Axelar bridge (~$3, 5min), DEX swap fees (0.2-0.3%), and slippage (0.5% per $1000). Signals are informational — bridge/swap execution requires independent tooling.
 
 **Bridge flow signals**: Tracks REGEN transfers via Axelar. Heavy outflow = distribution (sell pressure); heavy inflow = accumulation (buy pressure). Threshold: 10,000 REGEN net.
+
+**Hydrex epoch signals**: Tracks HYDX ve-model emissions directed to the REGEN pool. Epoch transition warnings fire < 6h before flip. Vote trend changes > 20% trigger emission shift signals. APR spikes > 50% trigger LP incentive signals.
 
 **Venue discovery**: The agent discovers all pool IDs and contract addresses dynamically at startup via CoinGecko platforms API and Osmosis IBC denom traces. No hardcoded addresses. Cache refreshes every 7 days.
 

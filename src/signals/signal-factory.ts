@@ -88,5 +88,13 @@ function computeSeverity(
     return d.direction === "distribution" ? "WARNING" : "INFO";
   }
 
+  // Hydrex signals
+  if (type === "HYDX_EPOCH_TRANSITION") {
+    const d = data as any;
+    return d.vote_trend === "decreasing" ? "WARNING" : "INFO";
+  }
+  if (type === "EMISSION_SHIFT") return "WARNING";
+  if (type === "LP_INCENTIVE_SPIKE") return "INFO";
+
   return "INFO";
 }

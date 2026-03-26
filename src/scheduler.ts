@@ -285,6 +285,35 @@ export class Scheduler {
               largest_tx_amount: ccSnapshot.bridge_flow.largest_tx?.amount_regen ?? 0,
             });
           }
+
+          // Hydrex epoch/emission signals
+          const hd = this.crossChainAggregator.lastHydrexData;
+          if (hd && this.onCrossChainSignal) {
+            // Epoch transition warning
+            if (hd.epoch_info.hours_until_flip < 6) {
+              const action = hd.vote_trend === "increasing"
+                ? "Monitor for LP inflow"
+                : hd.vote_trend === "decreasing" ? "Watch for LP exit" : "Monitor";
+              await this.onCrossChainSignal("HYDX_EPOCH_TRANSITION", {
+                current_epoch: hd.epoch_info.current_epoch,
+                hours_until_flip: hd.epoch_info.hours_until_flip,
+                votes_toward_regen: 0,
+                vote_trend: hd.vote_trend,
+                vote_change_pct: hd.vote_change_pct,
+                combined_apr_pct: hd.combined_apr_pct,
+                action,
+              });
+            }
+            // Emission shift (> 20% vote change)
+            if (Math.abs(hd.vote_change_pct) > 20) {
+              await this.onCrossChainSignal("EMISSION_SHIFT", {
+                votes_previous: 0, votes_current: 0,
+                change_pct: hd.vote_change_pct,
+                direction: hd.vote_change_pct > 0 ? "increasing" : "decreasing",
+                incentive_apr_pct: hd.incentive_apr_pct,
+              });
+            }
+          }
         }
       } catch (err) {
         this.logger.error({ err: String(err) }, "Cross-chain fetch failed");
