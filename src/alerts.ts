@@ -11,6 +11,8 @@ import type {
 } from "./types.js";
 import { DataStore } from "./data-store.js";
 import type { Logger } from "./logger.js";
+import type { MarketSignal, SignalType, SignalData, BroadcastChannel } from "./signals/signal-schema.js";
+import { buildSignal } from "./signals/signal-factory.js";
 
 /**
  * Alert manager with threshold checks, deduplication, and persistent state.
@@ -26,6 +28,10 @@ export class AlertManager {
   private alertCounter = 0;
   /** Recent price snapshots for trend computation */
   private recentPrices: number[] = [];
+  /** Signal publishing callback — set from index.ts */
+  public onSignal: ((signal: MarketSignal) => Promise<void>) | null = null;
+  /** Configured broadcast channels — set from index.ts */
+  public broadcastChannels: BroadcastChannel[] = ["rest"];
 
   constructor(config: Config, store: DataStore, logger: Logger) {
     this.config = config;
@@ -249,6 +255,34 @@ export class AlertManager {
         this.logger.error({ err, alert_id: alert.id }, "Alert listener error");
       }
     }
+
+    // Produce MarketSignal from alert
+    if (this.onSignal) {
+      try {
+        const signalType = this.alertTitleToSignalType(title);
+        if (signalType) {
+          const signal = buildSignal(signalType, data as any, { triggered_by: "scheduled_poll" }, this.broadcastChannels);
+          await this.onSignal(signal);
+        }
+      } catch (err) {
+        this.logger.warn({ err, title }, "Signal production from alert failed");
+      }
+    }
+  }
+
+  private alertTitleToSignalType(title: string): SignalType | null {
+    const map: Record<string, SignalType> = {
+      "Price Manipulation Flagged": "MANIPULATION_ALERT",
+      "Price Anomaly Detected": "PRICE_ANOMALY",
+      "Significant Price Movement": "PRICE_MOVEMENT",
+      "Low Credit Stock": "LOW_SUPPLY",
+      "Market Health Critical": "LIQUIDITY_WARNING",
+      "Market Health Declining": "LIQUIDITY_WARNING",
+      "Community Goal Completed": "GOAL_COMPLETED",
+      "Curation Quality Degradation": "CURATION_DEGRADED",
+      "High Retirement Demand": "GOAL_COMPLETED",
+    };
+    return map[title] ?? null;
   }
 }
 

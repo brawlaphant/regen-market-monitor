@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "dotenv": "^16.4.7",
+    "ioredis": "^5.10.1",
     "node-telegram-bot-api": "^0.66.0",
     "pino": "^9.6.0",
     "zod": "^4.3.6"

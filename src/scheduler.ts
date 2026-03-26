@@ -34,6 +34,9 @@ export class Scheduler {
   private readonly ONE_DAY_MS = 24 * 60 * 60 * 1000;
   private lastDigestDay = -1;
 
+  /** Callback when daily digest completes — produces MARKET_REPORT signal */
+  public onDigestComplete: ((snapshot: MarketSnapshot | null) => Promise<void>) | null = null;
+
   constructor(
     plugin: RegenMarketPlugin,
     alerts: AlertManager,
@@ -182,6 +185,7 @@ export class Scheduler {
       const uptimeSeconds = Math.round((Date.now() - this.startedAt) / 1000);
       this.notifier
         .sendDigest(this.health.snapshot, this.alerts.alertsFiredToday, uptimeSeconds)
+        .then(() => this.onDigestComplete?.(this.health.snapshot))
         .catch((err) => this.logger.error({ err }, "Daily digest failed"));
     }
   }
