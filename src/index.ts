@@ -8,6 +8,7 @@ import { DataStore } from "./data-store.js";
 import { Scheduler } from "./scheduler.js";
 import { HealthServer } from "./health-server.js";
 import { TelegramNotifier } from "./notifiers/telegram.js";
+import { ThresholdTuner } from "./tuner/threshold-tuner.js";
 import { LCDClient } from "./chain/lcd-client.js";
 import { EventWatcher } from "./chain/event-watcher.js";
 import { ProposalBuilder } from "./chain/proposal-builder.js";
@@ -49,6 +50,10 @@ async function main() {
 
   // Health endpoint
   const health = new HealthServer(config.port, logger);
+
+  // Threshold tuner — available via GET /tuning-report
+  const tuner = new ThresholdTuner(config, logger);
+  health.tuningAnalyzer = () => tuner.analyze();
 
   // ─── On-Chain Action Layer ────────────────────────────────────────
 
@@ -97,6 +102,7 @@ async function main() {
 
   // ─── Wire the Scheduler ───────────────────────────────────────────
 
+  // Log character system prompt
   logger.info(
     { system: MarketMonitorCharacter.system.join(" ") },
     "Character loaded"
@@ -109,8 +115,7 @@ async function main() {
   // Subscribe to chain events
   scheduler.subscribeToEvents(eventWatcher);
 
-  // Wire the freeze proposal pipeline:
-  // anomaly detected → proposal built → validated → approval requested → (human approves) → submitted
+  // Wire the freeze proposal pipeline
   scheduler.onCriticalAnomaly = async (anomalyReport) => {
     logger.info(
       { z_score: anomalyReport.z_score },
@@ -118,7 +123,6 @@ async function main() {
     );
 
     try {
-      // Get recent sell orders for context
       let orderIds: string[] = [];
       try {
         const orders = await lcd.getEcocreditSellOrders();
@@ -127,11 +131,9 @@ async function main() {
         logger.warn("Could not fetch sell orders for proposal context");
       }
 
-      // Build the proposal
       const priceHistory = store.loadPriceHistory();
       const proposal = builder.buildFreezeProposal(anomalyReport, priceHistory, orderIds);
 
-      // Validate
       const validation = await builder.validateProposal(proposal);
       if (!validation.valid) {
         logger.warn(
@@ -141,7 +143,6 @@ async function main() {
         return;
       }
 
-      // Request human approval
       await gate.requestApproval(proposal);
     } catch (err) {
       logger.error({ err }, "Freeze proposal pipeline failed");
