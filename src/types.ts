@@ -9,13 +9,9 @@ export interface MarketAlert {
   body: string;
   data: Record<string, unknown>;
   timestamp: Date;
-  /** Delta from last poll for the primary metric */
   delta?: string;
-  /** Trend indicator over last 3 polls (e.g. "↑↑↓") */
   trend?: string;
-  /** Link to Regen Network explorer */
   explorerUrl?: string;
-  /** Minutes until next check */
   nextCheckMinutes?: number;
 }
 
@@ -84,7 +80,7 @@ export interface CommunityGoalsResult {
 /** Price snapshot for rolling history — serializable to JSON */
 export interface PriceSnapshot {
   price_usd: number;
-  timestamp: string; // ISO string for JSON persistence
+  timestamp: string;
 }
 
 /** Liquidity assessment output */
@@ -139,6 +135,17 @@ export interface Config {
   dataDir: string;
   mcpTimeoutMs: number;
   mcpRetryAttempts: number;
+  // Chain config
+  regenLcdUrl: string;
+  regenRpcUrl: string;
+  regenMnemonic?: string;
+  regenChainId: string;
+  regenGasPrice: string;
+  gasMultiplier: number;
+  eventPollIntervalMs: number;
+  largeTradeThresholdUsd: number;
+  proposalExpiryMs: number;
+  telegramAdminChatId?: string;
 }
 
 /** MCP tool call response */
@@ -152,9 +159,9 @@ export interface McpToolResponse {
 
 /** Persisted alert state for deduplication across restarts */
 export interface PersistedAlertState {
-  lastFired: Record<string, number>; // title -> epoch ms
+  lastFired: Record<string, number>;
   alertsFiredToday: number;
-  dayStart: number; // epoch ms of start of current day
+  dayStart: number;
 }
 
 /** Full market snapshot written after each poll */
@@ -167,7 +174,7 @@ export interface MarketSnapshot {
   liquidity?: LiquidityReport;
   retirement?: RetirementReport;
   curation?: CurationReport;
-  lastPollAt: string; // ISO
+  lastPollAt: string;
   pollDurationMs: number;
 }
 
@@ -180,3 +187,135 @@ export interface HealthResponse {
   alertsFiredToday: number;
   uptime: number;
 }
+
+// ─── Chain / On-Chain Action Layer Types ─────────────────────────────
+
+/** LCD sell order from /regen/ecocredit/marketplace/v1/sell-orders */
+export interface LCDSellOrder {
+  id: string;
+  seller: string;
+  batch_denom: string;
+  quantity: string;
+  ask_denom: string;
+  ask_amount: string;
+  disable_auto_retire: boolean;
+  expiration?: string;
+}
+
+/** LCD credit batch from /regen/ecocredit/v1/batches */
+export interface LCDBatch {
+  batch_denom: string;
+  issuer: string;
+  project_id: string;
+  class_id: string;
+  start_date?: string;
+  end_date?: string;
+  open: boolean;
+}
+
+/** LCD retirement record */
+export interface LCDRetirement {
+  owner: string;
+  batch_denom: string;
+  amount: string;
+  jurisdiction: string;
+}
+
+/** LCD allowed denom from marketplace */
+export interface LCDAllowedDenom {
+  bank_denom: string;
+  display_denom: string;
+  exponent: number;
+}
+
+/** LCD governance voting params */
+export interface LCDVotingParams {
+  voting_period: string;
+}
+
+/** Persisted event cursor */
+export interface EventCursor {
+  lastSellOrderId: string;
+  lastRetirementHeight: string;
+  lastPollTimestamp: string;
+}
+
+/** Event types emitted by EventWatcher */
+export type ChainEventType = "new_sell_order" | "new_retirement" | "large_trade";
+
+export interface ChainEvent {
+  type: ChainEventType;
+  blockHeight: string;
+  data: Record<string, unknown>;
+}
+
+/** Evidence collected during anomaly detection */
+export interface AnomalyEvidence {
+  currentPrice: number;
+  medianPrice: number;
+  zScore: number;
+  priceHistory: PriceSnapshot[];
+  detectedAt: string;
+}
+
+/** A freeze proposal awaiting human approval */
+export interface FreezeProposal {
+  id: string;
+  title: string;
+  summary: string;
+  evidence: AnomalyEvidence;
+  affectedSellOrderIds: string[];
+  batchDenom: string;
+  zScore: number;
+  deposit: { denom: string; amount: string };
+  createdAt: string;
+  expiresAt: string;
+  status: "pending" | "approved" | "rejected" | "expired" | "submitted" | "failed";
+  rejectionReason?: string;
+  txHash?: string;
+}
+
+/** Result from proposal validation */
+export interface ValidationResult {
+  valid: boolean;
+  reasons: string[];
+  confidence: number;
+}
+
+/** Result from on-chain proposal submission */
+export interface SubmissionResult {
+  success: boolean;
+  txHash?: string;
+  blockHeight?: number;
+  gasUsed?: number;
+  error?: string;
+}
+
+/** Result from dry-run simulation */
+export interface DryRunResult {
+  success: boolean;
+  estimatedGas?: number;
+  estimatedFee?: string;
+  error?: string;
+}
+
+/** Audit log entry for proposal lifecycle */
+export interface AuditEntry {
+  timestamp: string;
+  event: AuditEvent;
+  proposalId: string;
+  actorType: "agent" | "human";
+  data: Record<string, unknown>;
+  version: "1.0";
+}
+
+export type AuditEvent =
+  | "proposal_created"
+  | "proposal_validated"
+  | "approval_requested"
+  | "approved"
+  | "rejected"
+  | "expired"
+  | "submitted"
+  | "submission_failed"
+  | "dry_run_completed";

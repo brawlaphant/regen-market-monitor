@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+// ─── MCP Response Schemas ───────────────────────────────────────────
+
 export const CreditClassHealthSchema = z.object({
   class_id: z.string(),
   class_name: z.string(),
@@ -141,4 +143,86 @@ export const MarketSignalSchema = z.object({
   data: SignalDataSchema,
   context: SignalContextSchema,
   routing: SignalRoutingSchema,
+});
+
+// ─── LCD Response Schemas ───────────────────────────────────────────
+
+export const LCDSellOrderSchema = z.object({
+  id: z.string(),
+  seller: z.string(),
+  batch_denom: z.string(),
+  quantity: z.string(),
+  ask_denom: z.string(),
+  ask_amount: z.string(),
+  disable_auto_retire: z.boolean(),
+  expiration: z.string().optional(),
+});
+
+export const LCDSellOrdersResponseSchema = z.object({
+  sell_orders: z.array(LCDSellOrderSchema),
+  pagination: z.object({
+    next_key: z.string().nullable().optional(),
+    total: z.string().optional(),
+  }).optional(),
+});
+
+export const LCDBatchSchema = z.object({
+  batch_denom: z.string(),
+  issuer: z.string(),
+  project_id: z.string(),
+  class_id: z.string(),
+  start_date: z.string().optional(),
+  end_date: z.string().optional(),
+  open: z.boolean(),
+});
+
+export const LCDBatchesResponseSchema = z.object({
+  batches: z.array(LCDBatchSchema),
+  pagination: z.object({
+    next_key: z.string().nullable().optional(),
+    total: z.string().optional(),
+  }).optional(),
+});
+
+export const LCDRetirementSchema = z.object({
+  owner: z.string(),
+  batch_denom: z.string(),
+  amount: z.string(),
+  jurisdiction: z.string(),
+});
+
+export const LCDRetirementsResponseSchema = z.object({
+  retirements: z.array(LCDRetirementSchema),
+  pagination: z.object({
+    next_key: z.string().nullable().optional(),
+    total: z.string().optional(),
+  }).optional(),
+});
+
+export const LCDAllowedDenomSchema = z.object({
+  bank_denom: z.string(),
+  display_denom: z.string(),
+  exponent: z.number(),
+});
+
+export const LCDAllowedDenomsResponseSchema = z.object({
+  allowed_denoms: z.array(LCDAllowedDenomSchema),
+  pagination: z.object({
+    next_key: z.string().nullable().optional(),
+    total: z.string().optional(),
+  }).optional(),
+});
+
+export const LCDVotingParamsResponseSchema = z.object({
+  params: z.object({
+    voting_period: z.string(),
+  }),
+});
+
+export const LCDLatestBlockResponseSchema = z.object({
+  block: z.object({
+    header: z.object({
+      height: z.string(),
+    }),
+  }),
 });

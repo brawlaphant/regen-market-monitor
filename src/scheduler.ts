@@ -3,17 +3,20 @@ import { AlertManager } from "./alerts.js";
 import { DataStore } from "./data-store.js";
 import { HealthServer } from "./health-server.js";
 import { TelegramNotifier } from "./notifiers/telegram.js";
-import type { Config, MarketSnapshot, AnomalyReport, LiquidityReport, RetirementReport, CurationReport } from "./types.js";
+import { EventWatcher } from "./chain/event-watcher.js";
+import type { Config, AnomalyReport, LiquidityReport, RetirementReport, CurationReport, ChainEvent, MarketSnapshot } from "./types.js";
 import type { Logger } from "./logger.js";
 
 /**
  * Polling scheduler with:
- * - Independent error boundaries per workflow (#2)
- * - MCP unreachable alerts (#3)
- * - Graceful shutdown: completes current cycle, flushes data (#6)
- * - Market snapshot cache (#10)
- * - Daily digest at configured UTC hour (#12)
- * - Health endpoint updates (#8)
+ * - Independent error boundaries per workflow
+ * - EventWatcher integration — chain events trigger immediate workflows
+ * - Workflow deduplication — never run two instances of the same workflow concurrently
+ * - Graceful shutdown: completes current cycle, flushes data
+ * - Market snapshot cache
+ * - Daily digest
+ *
+ * Returns the AnomalyReport from the latest run (for freeze proposal pipeline).
  */
 export class Scheduler {
   private plugin: RegenMarketPlugin;
@@ -37,6 +40,12 @@ export class Scheduler {
   /** Callback when daily digest completes — produces MARKET_REPORT signal */
   public onDigestComplete: ((snapshot: MarketSnapshot | null) => Promise<void>) | null = null;
 
+  /** Tracks running workflows to prevent duplicates */
+  private runningWorkflows = new Set<string>();
+
+  /** Callback when a CRITICAL anomaly is detected (z-score >= 3.5) */
+  public onCriticalAnomaly: ((report: AnomalyReport) => Promise<void>) | null = null;
+
   constructor(
     plugin: RegenMarketPlugin,
     alerts: AlertManager,
@@ -55,6 +64,14 @@ export class Scheduler {
     this.logger = logger;
   }
 
+  /** Subscribe to an EventWatcher for chain-triggered workflows */
+  subscribeToEvents(watcher: EventWatcher): void {
+    watcher.on("chain_event", (event: ChainEvent) => {
+      this.handleChainEvent(event);
+    });
+    this.logger.info("Scheduler subscribed to EventWatcher");
+  }
+
   async start(): Promise<void> {
     this.running = true;
     this.logger.info(
@@ -62,37 +79,101 @@ export class Scheduler {
       "Scheduler starting"
     );
 
-    // Load cached snapshot for immediate /state serving (#10)
     const cached = this.store.loadSnapshot();
     if (cached) {
       this.health.snapshot = cached;
       this.logger.info({ lastPollAt: cached.lastPollAt }, "Loaded cached snapshot for /state");
     }
 
-    // Graceful shutdown (#6)
     const shutdown = (signal: string) => this.stop(signal);
     process.on("SIGINT", () => shutdown("SIGINT"));
     process.on("SIGTERM", () => shutdown("SIGTERM"));
 
-    // Initial run
     await this.runCycle(true);
 
-    // Schedule recurring polls
     this.pollTimer = setInterval(async () => {
       if (!this.running) return;
       await this.runCycle(false);
     }, this.config.pollIntervalMs);
 
-    // Schedule daily digest check every minute (#12)
     this.digestTimer = setInterval(() => {
       this.checkDigest();
     }, 60_000);
 
-    // Update next poll time
     this.health.nextPollAt = new Date(Date.now() + this.config.pollIntervalMs);
-
     this.logger.info("Scheduler running");
   }
+
+  // ─── Chain Event Handler ──────────────────────────────────────────
+
+  private handleChainEvent(event: ChainEvent): void {
+    this.logger.info(
+      { trigger: "event_watcher", event_type: event.type, block_height: event.blockHeight },
+      "Chain event received"
+    );
+
+    switch (event.type) {
+      case "new_sell_order":
+        this.runWorkflow("WF-MM-01", () => this.runPriceAnomaly("event: new_sell_order"));
+        break;
+      case "new_retirement":
+        this.runWorkflow("WF-MM-03", () => this.runRetirementAnalysis("event: new_retirement"));
+        break;
+      case "large_trade":
+        this.runWorkflow("WF-MM-02", () => this.runLiquidityAssessment("event: large_trade"));
+        break;
+    }
+  }
+
+  /** Run a workflow if not already running (deduplication) */
+  private runWorkflow(name: string, fn: () => Promise<void>): void {
+    if (this.runningWorkflows.has(name)) {
+      this.logger.debug({ workflow: name }, "Workflow already running, skipping");
+      return;
+    }
+    this.runningWorkflows.add(name);
+    fn().finally(() => this.runningWorkflows.delete(name));
+  }
+
+  private async runPriceAnomaly(reason: string): Promise<void> {
+    try {
+      this.logger.info({ reason }, "WF-MM-01 triggered by event");
+      const anomaly = await this.plugin.detectPriceAnomaly();
+      this.alerts.recordPrice(anomaly.current_price);
+      await this.alerts.checkAnomaly(anomaly, this.lastPrice);
+      this.lastPrice = anomaly.current_price;
+
+      // Trigger freeze proposal pipeline on CRITICAL
+      if (anomaly.status === "flagged" && anomaly.z_score >= 3.5 && this.onCriticalAnomaly) {
+        await this.onCriticalAnomaly(anomaly);
+      }
+    } catch (err) {
+      this.logger.error({ workflow: "WF-MM-01", error: String(err) }, "Event-triggered price anomaly failed");
+    }
+  }
+
+  private async runLiquidityAssessment(reason: string): Promise<void> {
+    try {
+      this.logger.info({ reason }, "WF-MM-02 triggered by event");
+      const liquidity = await this.plugin.assessLiquidity();
+      await this.alerts.checkLiquidity(liquidity);
+    } catch (err) {
+      this.logger.error({ workflow: "WF-MM-02", error: String(err) }, "Event-triggered liquidity check failed");
+    }
+  }
+
+  private async runRetirementAnalysis(reason: string): Promise<void> {
+    try {
+      this.logger.info({ reason }, "WF-MM-03 triggered by event");
+      const retirement = await this.plugin.analyzeRetirements();
+      await this.alerts.checkRetirements(retirement);
+      this.lastRetirementRun = Date.now();
+    } catch (err) {
+      this.logger.error({ workflow: "WF-MM-03", error: String(err) }, "Event-triggered retirement analysis failed");
+    }
+  }
+
+  // ─── Scheduled Poll Cycle ─────────────────────────────────────────
 
   private async runCycle(isInitial: boolean): Promise<void> {
     const cycleStart = Date.now();
@@ -104,12 +185,16 @@ export class Scheduler {
     let retirement: RetirementReport | null = null;
     let curation: CurationReport | null = null;
 
-    // WF-MM-01: Price Anomaly Detection (#2: independent error boundary)
+    // WF-MM-01
     try {
       anomaly = await this.plugin.detectPriceAnomaly();
       this.alerts.recordPrice(anomaly.current_price);
       await this.alerts.checkAnomaly(anomaly, this.lastPrice);
       this.lastPrice = anomaly.current_price;
+
+      if (anomaly.status === "flagged" && anomaly.z_score >= 3.5 && this.onCriticalAnomaly) {
+        await this.onCriticalAnomaly(anomaly);
+      }
     } catch (err) {
       this.logger.error(
         { workflow: "WF-MM-01", tool: "get_regen_price/browse_available_credits", error: String(err), timestamp: new Date().toISOString() },
@@ -118,7 +203,7 @@ export class Scheduler {
       await this.alerts.emitMcpUnreachable("get_regen_price").catch(() => {});
     }
 
-    // WF-MM-02: Liquidity Monitoring (#2)
+    // WF-MM-02
     try {
       liquidity = await this.plugin.assessLiquidity();
       await this.alerts.checkLiquidity(liquidity);
@@ -130,7 +215,7 @@ export class Scheduler {
       await this.alerts.emitMcpUnreachable("check_supply_health").catch(() => {});
     }
 
-    // WF-MM-04: Curation Quality (#2)
+    // WF-MM-04
     try {
       curation = await this.plugin.scoreCurationQuality();
       await this.alerts.checkCuration(curation);
@@ -141,7 +226,7 @@ export class Scheduler {
       );
     }
 
-    // WF-MM-03: Retirement Analysis — once per day (#2)
+    // WF-MM-03 — once per day
     const now = Date.now();
     if (isInitial || now - this.lastRetirementRun >= this.ONE_DAY_MS) {
       try {
@@ -159,12 +244,10 @@ export class Scheduler {
 
     const elapsed = Date.now() - cycleStart;
 
-    // Build and persist market snapshot (#10)
     const snapshot = this.plugin.buildSnapshot(anomaly, liquidity, retirement, curation, elapsed);
     this.store.saveSnapshot(snapshot);
     this.health.snapshot = snapshot;
 
-    // Update health endpoint state (#8)
     this.health.lastPollAt = new Date();
     this.health.nextPollAt = new Date(Date.now() + this.config.pollIntervalMs);
     this.health.mcpReachable = this.plugin.lastPrice !== null || this.plugin.lastSupplyHealth !== null;
@@ -174,7 +257,6 @@ export class Scheduler {
     this.logger.info({ elapsed_ms: elapsed }, "Poll cycle complete");
   }
 
-  /** Check if it's time to send daily digest (#12) */
   private checkDigest(): void {
     const now = new Date();
     const utcHour = now.getUTCHours();
@@ -190,7 +272,6 @@ export class Scheduler {
     }
   }
 
-  /** Graceful shutdown: wait for current cycle, flush data, exit (#6) */
   async stop(signal?: string): Promise<void> {
     if (!this.running) return;
     this.running = false;
@@ -199,16 +280,9 @@ export class Scheduler {
       this.logger.info({ signal }, "Shutdown signal received");
     }
 
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-    }
-    if (this.digestTimer) {
-      clearInterval(this.digestTimer);
-      this.digestTimer = null;
-    }
+    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+    if (this.digestTimer) { clearInterval(this.digestTimer); this.digestTimer = null; }
 
-    // Wait for in-progress cycle to complete (#6)
     if (this.cycleInProgress) {
       this.logger.info("Waiting for current cycle to complete...");
       let waits = 0;
@@ -218,13 +292,10 @@ export class Scheduler {
       }
     }
 
-    // Flush all persistent data (#6)
     this.logger.info("Flushing data to disk...");
     this.plugin.flushPriceHistory();
     this.alerts.flush();
     await this.store.waitForWrites();
-
-    // Close health server
     await this.health.close();
 
     this.logger.info("Scheduler stopped — clean shutdown");

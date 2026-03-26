@@ -4,9 +4,14 @@ import type { Logger } from "./logger.js";
 import { handleSignalRoutes } from "./server/signals-routes.js";
 import type { SignalStore } from "./signals/signal-store.js";
 import type { SignalPublisher } from "./signals/signal-publisher.js";
+import type { TuningReport } from "./tuner/threshold-tuner.js";
 
 /**
- * HTTP server exposing health, state, and signal endpoints.
+ * HTTP server exposing health, state, signal, and tuning endpoints.
+ * GET /health         → agent status, last/next poll, MCP reachability, alerts today
+ * GET /state          → full market snapshot (last known values from each tool)
+ * GET /tuning-report  → threshold tuning analysis
+ * GET /signals*       → signal routes (list, detail, SSE stream, schema, stats)
  */
 export class HealthServer {
   private server: http.Server;
@@ -18,6 +23,8 @@ export class HealthServer {
   public mcpReachable = true;
   public alertsFiredToday = 0;
   public snapshot: MarketSnapshot | null = null;
+  /** Tuning analyzer function, set from index.ts */
+  public tuningAnalyzer: (() => TuningReport) | null = null;
 
   /** Signal infrastructure — set from index.ts after init */
   public signalStore: SignalStore | null = null;
@@ -44,6 +51,8 @@ export class HealthServer {
         this.handleHealth(res);
       } else if (req.url === "/state") {
         this.handleState(res);
+      } else if (req.url === "/tuning-report") {
+        this.handleTuning(res);
       } else {
         res.writeHead(404);
         res.end(JSON.stringify({ error: "not found" }));
@@ -109,6 +118,18 @@ export class HealthServer {
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(this.snapshot, null, 2));
+  }
+
+  private handleTuning(res: http.ServerResponse): void {
+    if (!this.tuningAnalyzer) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ready: false, reason: "tuner not initialized" }));
+      return;
+    }
+
+    const report = this.tuningAnalyzer();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(report, null, 2));
   }
 
   close(): Promise<void> {
