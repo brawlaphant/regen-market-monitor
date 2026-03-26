@@ -13,7 +13,8 @@
   "dependencies": {
     "dotenv": "^16.4.7",
     "node-telegram-bot-api": "^0.66.0",
-    "pino": "^9.6.0"
+    "pino": "^9.6.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -27,8 +28,12 @@
     "@elizaos/plugin-node": "^0.x"
   },
   "peerDependenciesMeta": {
-    "@elizaos/core": { "optional": true },
-    "@elizaos/plugin-node": { "optional": true }
+    "@elizaos/core": {
+      "optional": true
+    },
+    "@elizaos/plugin-node": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=20"
