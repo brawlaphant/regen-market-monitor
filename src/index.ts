@@ -24,6 +24,7 @@ import { ArbitrageDetector } from "./chain/arbitrage-detector.js";
 import { SignalComposer } from "./signals/signal-composer.js";
 import { SignalInvalidator } from "./signals/signal-invalidator.js";
 import { TradingSignalStore } from "./signals/trading-signal-store.js";
+import { SignalPerformanceTracker } from "./backtest/signal-performance-tracker.js";
 import { WalletRegistry } from "./chain/whale/wallet-registry.js";
 import { MovementDetector } from "./chain/whale/movement-detector.js";
 import { PatternAnalyzer } from "./chain/whale/pattern-analyzer.js";
@@ -150,6 +151,9 @@ async function main() {
   const composer = new SignalComposer(config.dataDir, logger);
   const invalidator = new SignalInvalidator(logger);
   health.tradingSignalStore = tradingStore;
+
+  const perfTracker = new SignalPerformanceTracker(config.dataDir, logger);
+  health.performanceTracker = perfTracker;
 
   // ─── Execution + Strategy Layer ─────────────────────────────────
 

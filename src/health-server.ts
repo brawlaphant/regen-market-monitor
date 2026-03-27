@@ -10,6 +10,7 @@ import type { ArbitrageDetector } from "./chain/arbitrage-detector.js";
 import type { TradingSignalStore } from "./signals/trading-signal-store.js";
 import type { ExecutionLedger } from "./execution/execution-ledger.js";
 import type { AccumulationStrategy } from "./strategies/accumulation-strategy.js";
+import type { SignalPerformanceTracker } from "./backtest/signal-performance-tracker.js";
 import type { WalletRegistry } from "./chain/whale/wallet-registry.js";
 import type { MovementDetector } from "./chain/whale/movement-detector.js";
 import type { PatternAnalyzer } from "./chain/whale/pattern-analyzer.js";
@@ -39,6 +40,7 @@ export class HealthServer {
   public tradingSignalStore: TradingSignalStore | null = null;
   public executionLedger: ExecutionLedger | null = null;
   public accumulationStrategy: AccumulationStrategy | null = null;
+  public performanceTracker: SignalPerformanceTracker | null = null;
   public walletRegistry: WalletRegistry | null = null;
   public movementDetector: MovementDetector | null = null;
   public patternAnalyzer: PatternAnalyzer | null = null;
@@ -119,6 +121,12 @@ export class HealthServer {
           this.jsonResponse(res, 200, { today: this.executionLedger.getDailySummary(), all_time: this.executionLedger.getPositionSummary(price) });
           return;
         }
+      }
+
+      // Backtest routes
+      if (req.url === "/backtest/performance" && this.performanceTracker) {
+        this.jsonResponse(res, 200, this.performanceTracker.getLivePerformance());
+        return;
       }
 
       // Whale routes
