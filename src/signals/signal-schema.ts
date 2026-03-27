@@ -17,6 +17,8 @@ export const SIGNAL_TYPES = [
   "HYDX_EPOCH_TRANSITION",
   "EMISSION_SHIFT",
   "LP_INCENTIVE_SPIKE",
+  "SENTIMENT_SHIFT",
+  "GOVERNANCE_EVENT",
   "WHALE_MOVEMENT",
   "WHALE_PATTERN",
 ] as const;
@@ -152,6 +154,21 @@ export interface LpIncentiveSpikeData {
   tvl_usd: number;
 }
 
+export interface SentimentShiftData {
+  previous_score: number;
+  current_score: number;
+  delta: number;
+  dominant_topics: string[];
+  notable_post_title?: string;
+}
+
+export interface GovernanceEventData {
+  proposal_id: string;
+  title: string;
+  status: string;
+  importance: string;
+}
+
 export interface WhaleMovementData {
   wallet_label: string;
   wallet_tier: string;
@@ -186,6 +203,8 @@ export type SignalData =
   | HydxEpochTransitionData
   | EmissionShiftData
   | LpIncentiveSpikeData
+  | SentimentShiftData
+  | GovernanceEventData
   | WhaleMovementData
   | WhalePatternData;
 
@@ -233,6 +252,8 @@ export const ROUTING_TABLE: Record<SignalType, AgentId[]> = {
   HYDX_EPOCH_TRANSITION: ["AGENT-001", "AGENT-002"],
   EMISSION_SHIFT: ["AGENT-001", "AGENT-002"],
   LP_INCENTIVE_SPIKE: ["AGENT-001", "AGENT-002", "AGENT-004"],
+  SENTIMENT_SHIFT: ["AGENT-001", "AGENT-002"],
+  GOVERNANCE_EVENT: ["AGENT-002"],
   WHALE_MOVEMENT: ["AGENT-001", "AGENT-002", "AGENT-004"],
   WHALE_PATTERN: ["AGENT-001", "AGENT-002", "AGENT-004"],
 };
@@ -254,6 +275,8 @@ export const TTL_TABLE: Record<SignalType, number> = {
   HYDX_EPOCH_TRANSITION: 21600, // 6h — lasts until epoch flips
   EMISSION_SHIFT: 3600,
   LP_INCENTIVE_SPIKE: 3600,
+  SENTIMENT_SHIFT: 3600,
+  GOVERNANCE_EVENT: 7200,
   WHALE_MOVEMENT: 1800,
   WHALE_PATTERN: 3600,
 };

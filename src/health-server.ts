@@ -10,6 +10,7 @@ import type { ArbitrageDetector } from "./chain/arbitrage-detector.js";
 import type { TradingSignalStore } from "./signals/trading-signal-store.js";
 import type { ExecutionLedger } from "./execution/execution-ledger.js";
 import type { AccumulationStrategy } from "./strategies/accumulation-strategy.js";
+import type { SentimentScorer } from "./sentiment/sentiment-scorer.js";
 import type { SignalPerformanceTracker } from "./backtest/signal-performance-tracker.js";
 import type { WalletRegistry } from "./chain/whale/wallet-registry.js";
 import type { MovementDetector } from "./chain/whale/movement-detector.js";
@@ -40,6 +41,7 @@ export class HealthServer {
   public tradingSignalStore: TradingSignalStore | null = null;
   public executionLedger: ExecutionLedger | null = null;
   public accumulationStrategy: AccumulationStrategy | null = null;
+  public sentimentScorer: SentimentScorer | null = null;
   public performanceTracker: SignalPerformanceTracker | null = null;
   public walletRegistry: WalletRegistry | null = null;
   public movementDetector: MovementDetector | null = null;
@@ -121,6 +123,13 @@ export class HealthServer {
           this.jsonResponse(res, 200, { today: this.executionLedger.getDailySummary(), all_time: this.executionLedger.getPositionSummary(price) });
           return;
         }
+      }
+
+      // Sentiment routes
+      if (req.url === "/sentiment/report" && this.sentimentScorer) {
+        const report = this.sentimentScorer.getCached();
+        this.jsonResponse(res, report ? 200 : 503, report || { error: "no data yet" });
+        return;
       }
 
       // Backtest routes

@@ -96,6 +96,12 @@ function computeSeverity(
   if (type === "EMISSION_SHIFT") return "WARNING";
   if (type === "LP_INCENTIVE_SPIKE") return "INFO";
 
+  if (type === "SENTIMENT_SHIFT") {
+    const d = data as any;
+    return Math.abs(d.delta) > 5 ? "WARNING" : "INFO";
+  }
+  if (type === "GOVERNANCE_EVENT") return "INFO";
+
   if (type === "WHALE_MOVEMENT") {
     const d = data as any;
     if (d.significance === "critical") return "CRITICAL";

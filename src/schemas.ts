@@ -67,6 +67,7 @@ const SignalTypeSchema = z.enum([
   "GOAL_COMPLETED", "CURATION_DEGRADED", "MARKET_REPORT", "MANIPULATION_ALERT",
   "CROSS_CHAIN_ARBITRAGE", "BRIDGE_FLOW_SPIKE", "VENUE_PRICE_DIVERGENCE", "LIQUIDITY_MIGRATION",
   "HYDX_EPOCH_TRANSITION", "EMISSION_SHIFT", "LP_INCENTIVE_SPIKE",
+  "SENTIMENT_SHIFT", "GOVERNANCE_EVENT",
   "WHALE_MOVEMENT", "WHALE_PATTERN",
 ]);
 
@@ -171,6 +172,8 @@ const SignalDataSchema = z.union([
   CrossChainArbitrageDataSchema, BridgeFlowSpikeDataSchema,
   VenuePriceDivergenceDataSchema, LiquidityMigrationDataSchema,
   HydxEpochTransitionDataSchema, EmissionShiftDataSchema, LpIncentiveSpikeDataSchema,
+  z.object({ previous_score: z.number(), current_score: z.number(), delta: z.number(), dominant_topics: z.array(z.string()), notable_post_title: z.string().optional() }),
+  z.object({ proposal_id: z.string(), title: z.string(), status: z.string(), importance: z.string() }),
   WhaleMovementDataSchema, WhalePatternDataSchema,
 ]);
 
