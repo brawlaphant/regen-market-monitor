@@ -259,6 +259,41 @@ The agent monitors REGEN across 5 venues on 4 chains:
 
 > Arbitrage signals are informational. Always verify prices on-chain before acting.
 
+## Trading Signal Engine
+
+The agent synthesizes all intelligence into ranked actionable trading signals with conviction grades, size recommendations, and automatic invalidation.
+
+### Signal Classes
+
+| Class | Direction | Description |
+|---|---|---|
+| `ARBITRAGE_LONG` | long | Pure spread play across venues |
+| `MOMENTUM_LONG` | long | Price moving up with volume confirmation |
+| `MOMENTUM_SHORT` | short | Price moving down with volume confirmation |
+| `ACCUMULATION` | long | Bridge inflows + incentives aligning |
+| `DISTRIBUTION` | short | Bridge outflows + liquidity leaving |
+| `EPOCH_PLAY` | long/short | Hydrex epoch transition with clear vote direction |
+| `MEAN_REVERSION` | long/short | Z-score extreme, expect reversion |
+| `HOLD` | neutral | No clear signal |
+| `EXIT` | exit | Multiple bearish signals aligned |
+
+### Conviction Grades
+
+- **A** — all confirming indicators aligned, act now (score >= 6, 3+ dimensions)
+- **B** — majority aligned, moderate confidence (score >= 3, 2+ dimensions)
+- **C** — single indicator, watch only (score >= 1)
+
+### Endpoints
+
+| Endpoint | Description |
+|---|---|
+| `GET /signals/trading` | List signals (?conviction, ?direction, ?signal_class, ?active_only, ?limit) |
+| `GET /signals/trading/:id` | Get signal by ID |
+| `GET /signals/trading/latest` | Most recent non-expired signal per class |
+| `GET /signals/trading/performance` | Hypothetical performance analysis on expired signals |
+
+> Performance metrics are hypothetical. They compare entry price vs current price on expired signals — not actual trading results.
+
 ## Testing
 
 ```bash

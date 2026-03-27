@@ -189,6 +189,46 @@ export const MarketSignalSchema = z.object({
   routing: SignalRoutingSchema,
 });
 
+// ─── Trading Signal Schema ──────────────────────────────────────────
+
+const SignalClassSchema = z.enum([
+  "ARBITRAGE_LONG", "MOMENTUM_LONG", "MOMENTUM_SHORT", "ACCUMULATION",
+  "DISTRIBUTION", "EPOCH_PLAY", "MEAN_REVERSION", "LIQUIDITY_EVENT", "HOLD", "EXIT",
+]);
+
+const VenueContextSchema = z.object({
+  best_price_venue: z.string(), worst_price_venue: z.string(),
+  cross_chain_spread_pct: z.number(), hydrex_apr: z.number(),
+  hydrex_hours_to_epoch: z.number(),
+  hydrex_vote_trend: z.enum(["increasing", "decreasing", "stable"]),
+  bridge_flow_signal: z.enum(["accumulation", "distribution", "neutral"]),
+  total_liquidity_usd: z.number(),
+});
+
+export const TradingSignalSchema = z.object({
+  id: z.string(),
+  version: z.literal("1.0"),
+  generated_at: z.string(),
+  signal_class: SignalClassSchema,
+  direction: z.enum(["long", "short", "neutral", "exit"]),
+  conviction: z.enum(["A", "B", "C"]),
+  token: z.literal("REGEN"),
+  entry_venue: z.string(),
+  entry_price_usd: z.number(),
+  target_price_usd: z.number().nullable(),
+  stop_loss_usd: z.number().nullable(),
+  recommended_size_usd: z.number(),
+  max_size_usd: z.number(),
+  time_horizon: z.enum(["immediate", "1h", "4h", "24h", "epoch"]),
+  expiry_at: z.string(),
+  rationale: z.array(z.string()),
+  contributing_signals: z.array(z.string()),
+  risk_factors: z.array(z.string()),
+  venue_context: VenueContextSchema,
+  invalidated: z.boolean(),
+  invalidated_reason: z.string().optional(),
+});
+
 // ─── LCD Response Schemas ───────────────────────────────────────────
 
 export const LCDSellOrderSchema = z.object({

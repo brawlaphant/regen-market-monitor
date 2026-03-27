@@ -48,6 +48,10 @@ export class Scheduler {
   /** Callback when cross-chain signals fire */
   public onCrossChainSignal: ((type: string, data: Record<string, unknown>) => Promise<void>) | null = null;
 
+  /** Trading signal engine — set from index.ts */
+  public onComposeSignal: ((snapshot: any, recentSignals: any[]) => Promise<void>) | null = null;
+  public onInvalidateSignals: ((snapshot: any, recentSignals: any[]) => Promise<void>) | null = null;
+
   /** Tracks running workflows to prevent duplicates */
   private runningWorkflows = new Set<string>();
 
@@ -193,6 +197,13 @@ export class Scheduler {
     let retirement: RetirementReport | null = null;
     let curation: CurationReport | null = null;
 
+    // Invalidate active trading signals at start of cycle
+    if (this.onInvalidateSignals && this.crossChainAggregator?.getLastSnapshot()) {
+      try {
+        await this.onInvalidateSignals(this.crossChainAggregator.getLastSnapshot(), []);
+      } catch {}
+    }
+
     // WF-MM-01
     try {
       anomaly = await this.plugin.detectPriceAnomaly();
@@ -317,6 +328,15 @@ export class Scheduler {
         }
       } catch (err) {
         this.logger.error({ err: String(err) }, "Cross-chain fetch failed");
+      }
+    }
+
+    // Compose trading signal after all workflows complete
+    if (this.onComposeSignal && this.crossChainAggregator?.getLastSnapshot()) {
+      try {
+        await this.onComposeSignal(this.crossChainAggregator.getLastSnapshot(), []);
+      } catch (err) {
+        this.logger.warn({ err: String(err) }, "Trading signal composition failed");
       }
     }
 
