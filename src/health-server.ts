@@ -10,6 +10,8 @@ import type { ArbitrageDetector } from "./chain/arbitrage-detector.js";
 import type { TradingSignalStore } from "./signals/trading-signal-store.js";
 import type { ExecutionLedger } from "./execution/execution-ledger.js";
 import type { AccumulationStrategy } from "./strategies/accumulation-strategy.js";
+import type { LPPositionTracker } from "./lp/lp-position-tracker.js";
+import type { LPDecisionEngine } from "./lp/lp-decision-engine.js";
 
 /**
  * HTTP server exposing health, state, signal, and tuning endpoints.
@@ -36,6 +38,8 @@ export class HealthServer {
   public tradingSignalStore: TradingSignalStore | null = null;
   public executionLedger: ExecutionLedger | null = null;
   public accumulationStrategy: AccumulationStrategy | null = null;
+  public lpTracker: LPPositionTracker | null = null;
+  public lpDecisionEngine: LPDecisionEngine | null = null;
 
   /** Signal infrastructure — set from index.ts after init */
   public signalStore: SignalStore | null = null;
@@ -113,6 +117,12 @@ export class HealthServer {
           this.jsonResponse(res, 200, { today: this.executionLedger.getDailySummary(), all_time: this.executionLedger.getPositionSummary(price) });
           return;
         }
+      }
+
+      // LP routes
+      if (req.url === "/lp/position" && this.lpTracker) {
+        this.jsonResponse(res, 200, this.lpTracker.getPosition() || { active: false });
+        return;
       }
 
       // Cross-chain routes
