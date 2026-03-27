@@ -7,6 +7,7 @@ import type { SignalPublisher } from "./signals/signal-publisher.js";
 import type { TuningReport } from "./tuner/threshold-tuner.js";
 import type { CrossChainAggregator } from "./chain/cross-chain-aggregator.js";
 import type { ArbitrageDetector } from "./chain/arbitrage-detector.js";
+import type { TradingSignalStore } from "./signals/trading-signal-store.js";
 
 /**
  * HTTP server exposing health, state, signal, and tuning endpoints.
@@ -30,6 +31,7 @@ export class HealthServer {
   /** Cross-chain intelligence, set from index.ts */
   public crossChainAggregator: CrossChainAggregator | null = null;
   public arbitrageDetector: ArbitrageDetector | null = null;
+  public tradingSignalStore: TradingSignalStore | null = null;
 
   /** Signal infrastructure — set from index.ts after init */
   public signalStore: SignalStore | null = null;
@@ -48,6 +50,41 @@ export class HealthServer {
       // Signal routes first
       if (this.signalStore && this.signalPublisher) {
         if (handleSignalRoutes(req, res, this.signalStore, this.signalPublisher, this.logger)) {
+          return;
+        }
+      }
+
+      // Trading signal routes
+      if (this.tradingSignalStore) {
+        const tUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+        const tPath = tUrl.pathname;
+        if (tPath === "/signals/trading") {
+          const p = tUrl.searchParams;
+          const signals = this.tradingSignalStore.getRecent(
+            Math.min(parseInt(p.get("limit") || "20", 10), 200),
+            {
+              conviction: p.get("conviction") || undefined,
+              direction: p.get("direction") || undefined,
+              signal_class: p.get("signal_class") || undefined,
+              active_only: p.get("active_only") === "true",
+            }
+          );
+          this.jsonResponse(res, 200, { signals, active_count: this.tradingSignalStore.getActive().length, stats: this.tradingSignalStore.getStats() });
+          return;
+        }
+        if (tPath === "/signals/trading/latest") {
+          this.jsonResponse(res, 200, this.tradingSignalStore.getLatestPerClass());
+          return;
+        }
+        if (tPath === "/signals/trading/performance") {
+          const price = this.crossChainAggregator?.getLastSnapshot()?.weighted_price_usd ?? 0;
+          this.jsonResponse(res, 200, this.tradingSignalStore.getPerformance(price));
+          return;
+        }
+        const tIdMatch = tPath.match(/^\/signals\/trading\/([a-f0-9-]{36})$/);
+        if (tIdMatch) {
+          const sig = this.tradingSignalStore.getById(tIdMatch[1]);
+          this.jsonResponse(res, sig ? 200 : 404, sig || { error: "not_found" });
           return;
         }
       }

@@ -21,6 +21,9 @@ import { TelegramCommandHandler } from "./chain/telegram-commands.js";
 import { AuditLog } from "./chain/audit-log.js";
 import { CrossChainAggregator } from "./chain/cross-chain-aggregator.js";
 import { ArbitrageDetector } from "./chain/arbitrage-detector.js";
+import { SignalComposer } from "./signals/signal-composer.js";
+import { SignalInvalidator } from "./signals/signal-invalidator.js";
+import { TradingSignalStore } from "./signals/trading-signal-store.js";
 import { loadConfig } from "./config.js";
 import { createLogger } from "./logger.js";
 
@@ -83,6 +86,13 @@ async function main() {
   health.crossChainAggregator = crossChain;
   health.arbitrageDetector = arbDetector;
 
+  // ─── Trading Signal Engine ──────────────────────────────────────
+
+  const tradingStore = new TradingSignalStore(config.dataDir, logger);
+  const composer = new SignalComposer(config.dataDir, logger);
+  const invalidator = new SignalInvalidator(logger);
+  health.tradingSignalStore = tradingStore;
+
   // ─── On-Chain Action Layer ────────────────────────────────────────
 
   const lcd = new LCDClient(config, logger);
@@ -140,6 +150,34 @@ async function main() {
       const signal = buildSignal(type as any, data as any, { triggered_by: "scheduled_poll", workflow_id: "cross-chain" }, signalPublisher.configuredChannels);
       await signalPublisher.publish(signal);
     } catch (err) { logger.warn({ err, type }, "Cross-chain signal publish failed"); }
+  };
+
+  // Wire trading signal composer + invalidator
+  scheduler.onComposeSignal = async (ccSnapshot, _recentSignals) => {
+    try {
+      const recentMS = signalStore.getRecent(50);
+      const ts = composer.compose(ccSnapshot, recentMS);
+      tradingStore.push(ts);
+      logger.info({ class: ts.signal_class, conviction: ts.conviction, direction: ts.direction }, "Trading signal composed");
+      // Notify Telegram on A-conviction signals
+      if (ts.conviction === "A" && ts.direction !== "neutral") {
+        const msg = `Signal: ${ts.direction.toUpperCase()} REGEN \u2014 Conviction A\nClass: ${ts.signal_class}\nEntry: ${ts.entry_venue} @ $${ts.entry_price_usd.toFixed(4)}\nTarget: $${ts.target_price_usd?.toFixed(4) || "n/a"}\nSize: $${ts.recommended_size_usd}\nHorizon: ${ts.time_horizon}\nWhy: ${ts.rationale.slice(0, 2).join(", ")}`;
+        notifier.sendAlert({ id: ts.id, severity: "CRITICAL", title: `Trading Signal: ${ts.signal_class}`, body: msg, data: { conviction: "A", class: ts.signal_class }, timestamp: new Date() });
+      }
+    } catch (err) { logger.warn({ err }, "Trading signal compose failed"); }
+  };
+
+  scheduler.onInvalidateSignals = async (ccSnapshot, _recentSignals) => {
+    try {
+      const active = tradingStore.getActive();
+      const recentMS = signalStore.getRecent(50);
+      const invalidated = invalidator.checkAll(active, ccSnapshot, recentMS);
+      for (const inv of invalidated) {
+        if (inv.conviction === "A" || inv.conviction === "B") {
+          notifier.sendAlert({ id: inv.id, severity: "WARNING", title: "Signal Invalidated", body: `${inv.signal_class} ${inv.direction} invalidated: ${inv.invalidated_reason}`, data: { class: inv.signal_class, reason: inv.invalidated_reason }, timestamp: new Date() });
+        }
+      }
+    } catch (err) { logger.warn({ err }, "Signal invalidation check failed"); }
   };
 
   // Wire the freeze proposal pipeline
