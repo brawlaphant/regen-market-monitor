@@ -144,6 +144,25 @@ export class SignalComposer {
     if (lowSupply.length === 0 && critLiquidity.length === 0) supplyScore += 1;
     dims.push({ name: "supply", score: supplyScore, reason: `${lowSupply.length} supply alerts` });
 
+    // 6. Community sentiment
+    let sentimentScore = 0;
+    const sentimentSignals = recentSignals.filter((s) => s.signal_type === "SENTIMENT_SHIFT");
+    for (const ss of sentimentSignals) {
+      const sd = ss.data as any;
+      const score = sd.current_score ?? 0;
+      if (score > 6) sentimentScore += 2;
+      else if (score > 3) sentimentScore += 1;
+      else if (score < -6) sentimentScore -= 2;
+      else if (score < -3) sentimentScore -= 1;
+      contributing.push(ss.id);
+    }
+    const govSignals = recentSignals.filter((s) => s.signal_type === "GOVERNANCE_EVENT");
+    if (govSignals.length > 0) {
+      sentimentScore += 1; // governance activity = engagement
+      govSignals.forEach((s) => contributing.push(s.id));
+    }
+    dims.push({ name: "community_sentiment", score: sentimentScore, reason: `${sentimentSignals.length} sentiment, ${govSignals.length} governance` });
+
     // Total score
     const totalScore = dims.reduce((s, d) => s + d.score, 0);
     const confirmingDims = dims.filter((d) => Math.sign(d.score) === Math.sign(totalScore) && d.score !== 0).length;
