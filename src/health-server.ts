@@ -12,6 +12,11 @@ import type { ExecutionLedger } from "./execution/execution-ledger.js";
 import type { AccumulationStrategy } from "./strategies/accumulation-strategy.js";
 import type { LPPositionTracker } from "./lp/lp-position-tracker.js";
 import type { LPDecisionEngine } from "./lp/lp-decision-engine.js";
+import type { SentimentScorer } from "./sentiment/sentiment-scorer.js";
+import type { SignalPerformanceTracker } from "./backtest/signal-performance-tracker.js";
+import type { WalletRegistry } from "./chain/whale/wallet-registry.js";
+import type { MovementDetector } from "./chain/whale/movement-detector.js";
+import type { PatternAnalyzer } from "./chain/whale/pattern-analyzer.js";
 
 /**
  * HTTP server exposing health, state, signal, and tuning endpoints.
@@ -40,6 +45,11 @@ export class HealthServer {
   public accumulationStrategy: AccumulationStrategy | null = null;
   public lpTracker: LPPositionTracker | null = null;
   public lpDecisionEngine: LPDecisionEngine | null = null;
+  public sentimentScorer: SentimentScorer | null = null;
+  public performanceTracker: SignalPerformanceTracker | null = null;
+  public walletRegistry: WalletRegistry | null = null;
+  public movementDetector: MovementDetector | null = null;
+  public patternAnalyzer: PatternAnalyzer | null = null;
 
   /** Signal infrastructure — set from index.ts after init */
   public signalStore: SignalStore | null = null;
@@ -122,6 +132,50 @@ export class HealthServer {
       // LP routes
       if (req.url === "/lp/position" && this.lpTracker) {
         this.jsonResponse(res, 200, this.lpTracker.getPosition() || { active: false });
+        return;
+      }
+
+      // Sentiment routes
+      if (req.url === "/sentiment/report" && this.sentimentScorer) {
+        const report = this.sentimentScorer.getCached();
+        this.jsonResponse(res, report ? 200 : 503, report || { error: "no data yet" });
+        return;
+      }
+
+      // Backtest routes
+      if (req.url === "/backtest/performance" && this.performanceTracker) {
+        this.jsonResponse(res, 200, this.performanceTracker.getLivePerformance());
+        return;
+      }
+
+      // Whale routes
+      if (req.url === "/whale/wallets" && this.walletRegistry) {
+        this.jsonResponse(res, 200, this.walletRegistry.getTopByBalance(50));
+        return;
+      }
+      if (this.movementDetector) {
+        const wUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+        if (wUrl.pathname === "/whale/movements") {
+          const limit = parseInt(wUrl.searchParams.get("limit") || "50", 10);
+          const sig = wUrl.searchParams.get("significance") || undefined;
+          const movements = this.movementDetector.getRecent(limit, sig);
+          this.jsonResponse(res, 200, movements);
+          return;
+        }
+      }
+      if (req.url === "/whale/patterns" && this.patternAnalyzer && this.movementDetector) {
+        const movements = this.movementDetector.getRecent(500);
+        const report = this.patternAnalyzer.analyze(movements, 24);
+        this.jsonResponse(res, 200, report);
+        return;
+      }
+      if (req.url === "/whale/stats" && this.walletRegistry && this.movementDetector) {
+        const todayMvmts = this.movementDetector.getRecent(500).filter(m => new Date(m.timestamp).toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10));
+        this.jsonResponse(res, 200, {
+          total_watched: this.walletRegistry.getTopByBalance(999).length,
+          movements_today: todayMvmts.length,
+          critical_today: todayMvmts.filter(m => m.significance === "critical").length,
+        });
         return;
       }
 
