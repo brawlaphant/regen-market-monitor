@@ -24,6 +24,7 @@ import { ArbitrageDetector } from "./chain/arbitrage-detector.js";
 import { SignalComposer } from "./signals/signal-composer.js";
 import { SignalInvalidator } from "./signals/signal-invalidator.js";
 import { TradingSignalStore } from "./signals/trading-signal-store.js";
+import { SignalPerformanceTracker } from "./backtest/signal-performance-tracker.js";
 import { BankrAdapter } from "./execution/bankr-adapter.js";
 import { ExecutionLedger } from "./execution/execution-ledger.js";
 import { StrategyOrchestrator } from "./strategies/strategy-orchestrator.js";
@@ -95,6 +96,9 @@ async function main() {
   const composer = new SignalComposer(config.dataDir, logger);
   const invalidator = new SignalInvalidator(logger);
   health.tradingSignalStore = tradingStore;
+
+  const perfTracker = new SignalPerformanceTracker(config.dataDir, logger);
+  health.performanceTracker = perfTracker;
 
   // ─── Execution + Strategy Layer ─────────────────────────────────
 

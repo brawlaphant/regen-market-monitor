@@ -10,6 +10,7 @@ import type { ArbitrageDetector } from "./chain/arbitrage-detector.js";
 import type { TradingSignalStore } from "./signals/trading-signal-store.js";
 import type { ExecutionLedger } from "./execution/execution-ledger.js";
 import type { AccumulationStrategy } from "./strategies/accumulation-strategy.js";
+import type { SignalPerformanceTracker } from "./backtest/signal-performance-tracker.js";
 
 /**
  * HTTP server exposing health, state, signal, and tuning endpoints.
@@ -36,6 +37,7 @@ export class HealthServer {
   public tradingSignalStore: TradingSignalStore | null = null;
   public executionLedger: ExecutionLedger | null = null;
   public accumulationStrategy: AccumulationStrategy | null = null;
+  public performanceTracker: SignalPerformanceTracker | null = null;
 
   /** Signal infrastructure — set from index.ts after init */
   public signalStore: SignalStore | null = null;
@@ -113,6 +115,12 @@ export class HealthServer {
           this.jsonResponse(res, 200, { today: this.executionLedger.getDailySummary(), all_time: this.executionLedger.getPositionSummary(price) });
           return;
         }
+      }
+
+      // Backtest routes
+      if (req.url === "/backtest/performance" && this.performanceTracker) {
+        this.jsonResponse(res, 200, this.performanceTracker.getLivePerformance());
+        return;
       }
 
       // Cross-chain routes
