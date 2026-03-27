@@ -8,6 +8,8 @@ import type { TuningReport } from "./tuner/threshold-tuner.js";
 import type { CrossChainAggregator } from "./chain/cross-chain-aggregator.js";
 import type { ArbitrageDetector } from "./chain/arbitrage-detector.js";
 import type { TradingSignalStore } from "./signals/trading-signal-store.js";
+import type { ExecutionLedger } from "./execution/execution-ledger.js";
+import type { AccumulationStrategy } from "./strategies/accumulation-strategy.js";
 
 /**
  * HTTP server exposing health, state, signal, and tuning endpoints.
@@ -32,6 +34,8 @@ export class HealthServer {
   public crossChainAggregator: CrossChainAggregator | null = null;
   public arbitrageDetector: ArbitrageDetector | null = null;
   public tradingSignalStore: TradingSignalStore | null = null;
+  public executionLedger: ExecutionLedger | null = null;
+  public accumulationStrategy: AccumulationStrategy | null = null;
 
   /** Signal infrastructure — set from index.ts after init */
   public signalStore: SignalStore | null = null;
@@ -85,6 +89,28 @@ export class HealthServer {
         if (tIdMatch) {
           const sig = this.tradingSignalStore.getById(tIdMatch[1]);
           this.jsonResponse(res, sig ? 200 : 404, sig || { error: "not_found" });
+          return;
+        }
+      }
+
+      // Strategy/execution routes
+      if (req.url === "/strategy/position" && this.accumulationStrategy) {
+        const pos = this.accumulationStrategy.getPosition();
+        const price = this.crossChainAggregator?.getLastSnapshot()?.weighted_price_usd ?? 0;
+        this.jsonResponse(res, 200, { ...pos, current_price_usd: price, unrealized_pnl_pct: pos.avg_entry_price_usd > 0 ? Math.round(((price - pos.avg_entry_price_usd) / pos.avg_entry_price_usd) * 10000) / 100 : 0 });
+        return;
+      }
+      if (this.executionLedger) {
+        const eUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+        if (eUrl.pathname === "/execution/ledger") {
+          const limit = parseInt(eUrl.searchParams.get("limit") || "50", 10);
+          const phase = eUrl.searchParams.get("phase") || undefined;
+          this.jsonResponse(res, 200, this.executionLedger.getRecent(limit, phase));
+          return;
+        }
+        if (eUrl.pathname === "/execution/summary") {
+          const price = this.crossChainAggregator?.getLastSnapshot()?.weighted_price_usd ?? 0;
+          this.jsonResponse(res, 200, { today: this.executionLedger.getDailySummary(), all_time: this.executionLedger.getPositionSummary(price) });
           return;
         }
       }
