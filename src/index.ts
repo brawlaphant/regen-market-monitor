@@ -24,6 +24,9 @@ import { ArbitrageDetector } from "./chain/arbitrage-detector.js";
 import { SignalComposer } from "./signals/signal-composer.js";
 import { SignalInvalidator } from "./signals/signal-invalidator.js";
 import { TradingSignalStore } from "./signals/trading-signal-store.js";
+import { WalletRegistry } from "./chain/whale/wallet-registry.js";
+import { MovementDetector } from "./chain/whale/movement-detector.js";
+import { PatternAnalyzer } from "./chain/whale/pattern-analyzer.js";
 import { BankrAdapter } from "./execution/bankr-adapter.js";
 import { ExecutionLedger } from "./execution/execution-ledger.js";
 import { StrategyOrchestrator } from "./strategies/strategy-orchestrator.js";
@@ -88,6 +91,58 @@ async function main() {
   const arbDetector = new ArbitrageDetector(logger);
   health.crossChainAggregator = crossChain;
   health.arbitrageDetector = arbDetector;
+
+  // ─── Whale Wallet Tracker ──────────────────────────────────────
+
+  const walletRegistry = new WalletRegistry(logger, config.dataDir);
+  const movementDetector = new MovementDetector(logger, config.dataDir);
+  const patternAnalyzer = new PatternAnalyzer();
+  health.walletRegistry = walletRegistry;
+  health.movementDetector = movementDetector;
+  health.patternAnalyzer = patternAnalyzer;
+
+  // Poll whale wallets on an interval
+  if (process.env.WHALE_ENABLED !== "false") {
+    const whalePollMs = parseInt(process.env.WHALE_POLL_INTERVAL_MS || "300000", 10);
+    setInterval(async () => {
+      try {
+        const wallets = walletRegistry.getTopByBalance(50);
+        const movements = await movementDetector.poll(wallets);
+        if (movements.length > 0) {
+          const report = patternAnalyzer.analyze(movementDetector.getRecent(500), 24);
+          // Emit whale signals
+          for (const m of movements) {
+            if (m.significance === "critical" || m.significance === "high") {
+              try {
+                const { buildSignal } = await import("./signals/signal-factory.js");
+                const sig = buildSignal("WHALE_MOVEMENT" as any, {
+                  wallet_label: m.wallet_label, wallet_tier: m.wallet_tier,
+                  movement_type: m.movement_type, amount_regen: m.amount_regen,
+                  amount_usd: m.amount_usd, chain: m.chain, significance: m.significance,
+                } as any, { triggered_by: "event_watcher", workflow_id: "whale-tracker" }, signalPublisher.configuredChannels);
+                await signalPublisher.publish(sig);
+              } catch {}
+            }
+          }
+          if (report.patterns_detected.length > 0) {
+            try {
+              const { buildSignal } = await import("./signals/signal-factory.js");
+              const sig = buildSignal("WHALE_PATTERN" as any, {
+                pattern_type: report.patterns_detected[0], dominant_signal: report.dominant_signal,
+                confidence: report.confidence, affected_wallets: report.affected_wallets.length,
+                summary: report.summary,
+              } as any, { triggered_by: "event_watcher", workflow_id: "whale-tracker" }, signalPublisher.configuredChannels);
+              await signalPublisher.publish(sig);
+            } catch {}
+          }
+        }
+      } catch (err) { logger.warn({ err }, "Whale poll failed"); }
+    }, whalePollMs);
+
+    // Refresh balances every 4 hours
+    setInterval(() => walletRegistry.refreshBalances().catch(() => {}), 4 * 3600000);
+    logger.info({ interval_ms: whalePollMs }, "Whale tracker active");
+  }
 
   // ─── Trading Signal Engine ──────────────────────────────────────
 
