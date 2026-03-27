@@ -163,6 +163,26 @@ export class SignalComposer {
     }
     dims.push({ name: "community_sentiment", score: sentimentScore, reason: `${sentimentSignals.length} sentiment, ${govSignals.length} governance` });
 
+    // 7. Whale sentiment
+    let whaleScore = 0;
+    const whalePatterns = recentSignals.filter((s) => s.signal_type === "WHALE_PATTERN");
+    const whaleMovements = recentSignals.filter((s) => s.signal_type === "WHALE_MOVEMENT");
+    for (const wp of whalePatterns) {
+      const wd = wp.data as any;
+      if (wd.dominant_signal === "bullish" && wd.confidence > 0.8) whaleScore += 3;
+      else if (wd.dominant_signal === "bullish") whaleScore += 2;
+      else if (wd.dominant_signal === "bearish" && wd.confidence > 0.8) whaleScore -= 3;
+      else if (wd.dominant_signal === "bearish") whaleScore -= 2;
+      contributing.push(wp.id);
+    }
+    for (const wm of whaleMovements) {
+      const wd = wm.data as any;
+      if (wd.movement_type === "lp_add" || wd.movement_type === "receive") whaleScore += 1;
+      if (wd.movement_type === "lp_remove" || wd.movement_type === "bridge_out") { whaleScore -= 2; risks.push("Whale LP exit / bridge outflow"); }
+      contributing.push(wm.id);
+    }
+    dims.push({ name: "whale_sentiment", score: whaleScore, reason: `${whalePatterns.length} patterns, ${whaleMovements.length} movements` });
+
     // Total score
     const totalScore = dims.reduce((s, d) => s + d.score, 0);
     const confirmingDims = dims.filter((d) => Math.sign(d.score) === Math.sign(totalScore) && d.score !== 0).length;

@@ -19,6 +19,8 @@ export const SIGNAL_TYPES = [
   "LP_INCENTIVE_SPIKE",
   "SENTIMENT_SHIFT",
   "GOVERNANCE_EVENT",
+  "WHALE_MOVEMENT",
+  "WHALE_PATTERN",
 ] as const;
 export type SignalType = (typeof SIGNAL_TYPES)[number];
 
@@ -167,6 +169,24 @@ export interface GovernanceEventData {
   importance: string;
 }
 
+export interface WhaleMovementData {
+  wallet_label: string;
+  wallet_tier: string;
+  movement_type: string;
+  amount_regen: number;
+  amount_usd: number;
+  chain: string;
+  significance: string;
+}
+
+export interface WhalePatternData {
+  pattern_type: string;
+  dominant_signal: string;
+  confidence: number;
+  affected_wallets: number;
+  summary: string;
+}
+
 export type SignalData =
   | PriceAnomalyData
   | PriceMovementData
@@ -184,7 +204,9 @@ export type SignalData =
   | EmissionShiftData
   | LpIncentiveSpikeData
   | SentimentShiftData
-  | GovernanceEventData;
+  | GovernanceEventData
+  | WhaleMovementData
+  | WhalePatternData;
 
 export interface SignalContext {
   triggered_by: "scheduled_poll" | "event_watcher" | "manual";
@@ -232,6 +254,8 @@ export const ROUTING_TABLE: Record<SignalType, AgentId[]> = {
   LP_INCENTIVE_SPIKE: ["AGENT-001", "AGENT-002", "AGENT-004"],
   SENTIMENT_SHIFT: ["AGENT-001", "AGENT-002"],
   GOVERNANCE_EVENT: ["AGENT-002"],
+  WHALE_MOVEMENT: ["AGENT-001", "AGENT-002", "AGENT-004"],
+  WHALE_PATTERN: ["AGENT-001", "AGENT-002", "AGENT-004"],
 };
 
 /** TTL values by signal_type (seconds) */
@@ -253,6 +277,8 @@ export const TTL_TABLE: Record<SignalType, number> = {
   LP_INCENTIVE_SPIKE: 3600,
   SENTIMENT_SHIFT: 3600,
   GOVERNANCE_EVENT: 7200,
+  WHALE_MOVEMENT: 1800,
+  WHALE_PATTERN: 3600,
 };
 
 export interface PublishStatus {

@@ -102,5 +102,16 @@ function computeSeverity(
   }
   if (type === "GOVERNANCE_EVENT") return "INFO";
 
+  if (type === "WHALE_MOVEMENT") {
+    const d = data as any;
+    if (d.significance === "critical") return "CRITICAL";
+    if (d.significance === "high") return "WARNING";
+    return "INFO";
+  }
+  if (type === "WHALE_PATTERN") {
+    const d = data as any;
+    return d.dominant_signal === "bearish" ? "WARNING" : "INFO";
+  }
+
   return "INFO";
 }
