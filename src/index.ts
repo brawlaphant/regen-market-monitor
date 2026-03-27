@@ -24,6 +24,9 @@ import { ArbitrageDetector } from "./chain/arbitrage-detector.js";
 import { SignalComposer } from "./signals/signal-composer.js";
 import { SignalInvalidator } from "./signals/signal-invalidator.js";
 import { TradingSignalStore } from "./signals/trading-signal-store.js";
+import { BankrAdapter } from "./execution/bankr-adapter.js";
+import { ExecutionLedger } from "./execution/execution-ledger.js";
+import { StrategyOrchestrator } from "./strategies/strategy-orchestrator.js";
 import { loadConfig } from "./config.js";
 import { createLogger } from "./logger.js";
 
@@ -92,6 +95,22 @@ async function main() {
   const composer = new SignalComposer(config.dataDir, logger);
   const invalidator = new SignalInvalidator(logger);
   health.tradingSignalStore = tradingStore;
+
+  // ─── Execution + Strategy Layer ─────────────────────────────────
+
+  const bankrAdapter = new BankrAdapter(config.dataDir, logger);
+  const execLedger = new ExecutionLedger(config.dataDir, logger);
+  const orchestrator = new StrategyOrchestrator(bankrAdapter, execLedger, config.dataDir, logger);
+
+  // Trade approval via Telegram
+  bankrAdapter.onApprovalRequired = async (order) => {
+    const msg = `Trade approval required:\n${order.action.toUpperCase()} $${order.amount_usd} REGEN on ${order.venue}\nStrategy: ${order.phase}\nReply /approve-trade ${order.id} or /reject-trade ${order.id}`;
+    notifier.sendAlert({ id: order.id, severity: "WARNING", title: "Trade Approval Required", body: msg, data: { phase: order.phase, amount: order.amount_usd }, timestamp: new Date() });
+  };
+
+  // Expose to health server
+  health.executionLedger = execLedger;
+  health.accumulationStrategy = orchestrator.accumulationStrategy;
 
   // ─── On-Chain Action Layer ────────────────────────────────────────
 
@@ -163,6 +182,12 @@ async function main() {
       if (ts.conviction === "A" && ts.direction !== "neutral") {
         const msg = `Signal: ${ts.direction.toUpperCase()} REGEN \u2014 Conviction A\nClass: ${ts.signal_class}\nEntry: ${ts.entry_venue} @ $${ts.entry_price_usd.toFixed(4)}\nTarget: $${ts.target_price_usd?.toFixed(4) || "n/a"}\nSize: $${ts.recommended_size_usd}\nHorizon: ${ts.time_horizon}\nWhy: ${ts.rationale.slice(0, 2).join(", ")}`;
         notifier.sendAlert({ id: ts.id, severity: "CRITICAL", title: `Trading Signal: ${ts.signal_class}`, body: msg, data: { conviction: "A", class: ts.signal_class }, timestamp: new Date() });
+      }
+      // Run strategy orchestrator after signal composition
+      if (bankrAdapter.isEnabled) {
+        try {
+          await orchestrator.run(ccSnapshot, ts);
+        } catch (stratErr) { logger.warn({ stratErr }, "Strategy orchestrator failed"); }
       }
     } catch (err) { logger.warn({ err }, "Trading signal compose failed"); }
   };
