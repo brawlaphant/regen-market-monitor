@@ -12,13 +12,18 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "tune": "tsx src/tuner/cli.ts"
+    "tune": "tsx src/tuner/cli.ts",
+    "trading-desk": "TRADING_DESK_INTERVAL_MS=0 tsx src/trading-desk.ts",
+    "trading-desk:dry": "POLYMARKET_DRY_RUN=true HYPERLIQUID_DRY_RUN=true tsx src/trading-desk.ts",
+    "trading-desk:live": "POLYMARKET_DRY_RUN=false HYPERLIQUID_DRY_RUN=false tsx src/trading-desk.ts"
   },
   "dependencies": {
     "@cosmjs/proto-signing": "^0.32.4",
     "@cosmjs/stargate": "^0.32.4",
+    "@polymarket/clob-client": "^5.8.1",
     "dotenv": "^16.4.7",
     "ethers": "^6.16.0",
+    "hyperliquid": "^1.7.7",
     "ioredis": "^5.10.1",
     "node-telegram-bot-api": "^0.66.0",
     "pino": "^9.6.0",

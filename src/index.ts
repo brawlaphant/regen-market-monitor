@@ -31,6 +31,12 @@ import { PatternAnalyzer } from "./chain/whale/pattern-analyzer.js";
 import { BankrAdapter } from "./execution/bankr-adapter.js";
 import { ExecutionLedger } from "./execution/execution-ledger.js";
 import { StrategyOrchestrator } from "./strategies/strategy-orchestrator.js";
+import { RelayClient, buildRelayConfig } from "./litcoin/index.js";
+import { LitcreditScorer } from "./scoring/litcredit-provider.js";
+import { MultiVenueOrchestrator } from "./strategies/multi-venue-orchestrator.js";
+import { SurplusRouter } from "./surplus/surplus-router.js";
+import { McpToolSurface } from "./mcp/tools.js";
+import { cleanArtifacts } from "./artifact-cleaner.js";
 import { loadConfig } from "./config.js";
 import { createLogger } from "./logger.js";
 
@@ -170,6 +176,64 @@ async function main() {
   // Expose to health server
   health.executionLedger = execLedger;
   health.accumulationStrategy = orchestrator.accumulationStrategy;
+
+  // ─── Litcoin Protocol + Multi-Venue Trading ──────────────────────
+
+  const relayConfig = buildRelayConfig();
+  const relayClient = new RelayClient(relayConfig, config.dataDir, logger);
+  const scorer = new LitcreditScorer(relayClient, logger);
+  const surplus = new SurplusRouter(config.dataDir, logger);
+  const multiVenue = new MultiVenueOrchestrator(scorer, surplus, config.dataDir, logger);
+
+  if (relayConfig.authMethod !== "none") {
+    logger.info({ auth: relayConfig.authMethod, model: relayConfig.model }, "LITCREDIT relay configured");
+    // Background health check
+    relayClient.checkHealth().then(h => {
+      logger.info({ reachable: h.reachable, providers: h.relay_providers_online }, "LITCREDIT relay health");
+    }).catch(() => {});
+  } else {
+    logger.warn("LITCREDIT relay not configured — multi-venue scoring disabled");
+  }
+
+  // MCP tool surface — lets Claude operate the agent
+  const mcpTools = new McpToolSurface(logger);
+  mcpTools.wire({
+    relay: relayClient,
+    surplus,
+    orchestrator: multiVenue,
+    healthFn: () => ({
+      status: health.lastPollAt ? (health.mcpReachable ? "ok" : "degraded") : "starting",
+      uptime: Math.round((Date.now() - Date.now()) / 1000), // placeholder
+      lastPollAt: health.lastPollAt?.toISOString() ?? null,
+      alertsFiredToday: health.alertsFiredToday,
+    }),
+  });
+
+  // Multi-venue trading desk — runs on a configurable interval
+  const tradingDeskIntervalMs = parseInt(process.env.TRADING_DESK_INTERVAL_MS || "0", 10);
+  if (tradingDeskIntervalMs > 0 && relayConfig.authMethod !== "none") {
+    setInterval(async () => {
+      try {
+        const result = await multiVenue.run();
+        const totalSignals = result.venues.reduce((s, v) => s + v.signals_found, 0);
+        logger.info(
+          { signals: totalSignals, surplus_usd: result.surplus_allocation.routed_to_regen },
+          "Trading desk scan complete"
+        );
+      } catch (err) {
+        logger.warn({ err }, "Trading desk scan failed");
+      }
+    }, tradingDeskIntervalMs);
+    logger.info({ interval_ms: tradingDeskIntervalMs }, "Trading desk auto-scan active");
+  }
+
+  // Expose new modules to health server
+  health.relayClient = relayClient;
+  health.surplusRouter = surplus;
+  health.mcpTools = mcpTools;
+
+  // Artifact cleanup — runs once on startup, removes files older than 30 days
+  cleanArtifacts(config.dataDir, logger);
 
   // ─── On-Chain Action Layer ────────────────────────────────────────
 

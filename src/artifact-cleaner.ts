@@ -7,7 +7,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import type { Logger } from "../logger.js";
+import type { Logger } from "./logger.js";
 
 const DEFAULT_RETENTION_DAYS = 30;
 
