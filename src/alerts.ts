@@ -196,13 +196,11 @@ export class AlertManager {
     }
   }
 
-  /** Emit a WARNING for unreachable MCP tools (#3) */
+  /** Log MCP tool failures — no Telegram alert (cross-chain aggregator is primary data source) */
   async emitMcpUnreachable(toolName: string): Promise<void> {
-    await this.emit(
-      "WARNING",
-      "MCP Tool Unreachable",
-      `MCP tool "${toolName}" unreachable after ${this.config.mcpRetryAttempts} attempts.`,
-      { tool: toolName, attempts: this.config.mcpRetryAttempts }
+    this.logger.warn(
+      { tool: toolName, attempts: this.config.mcpRetryAttempts },
+      `MCP tool "${toolName}" unreachable — using cross-chain fallback`
     );
   }
 
