@@ -196,6 +196,7 @@ async function main() {
   }
 
   // MCP tool surface — lets Claude operate the agent
+  const startedAt = Date.now();
   const mcpTools = new McpToolSurface(logger);
   mcpTools.wire({
     relay: relayClient,
@@ -203,7 +204,7 @@ async function main() {
     orchestrator: multiVenue,
     healthFn: () => ({
       status: health.lastPollAt ? (health.mcpReachable ? "ok" : "degraded") : "starting",
-      uptime: Math.round((Date.now() - Date.now()) / 1000), // placeholder
+      uptime: Math.round((Date.now() - startedAt) / 1000),
       lastPollAt: health.lastPollAt?.toISOString() ?? null,
       alertsFiredToday: health.alertsFiredToday,
     }),

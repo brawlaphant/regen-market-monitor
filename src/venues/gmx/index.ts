@@ -1,12 +1,14 @@
 /**
  * GMX Venue — perpetual futures + GM pool yield on Arbitrum.
  *
- * Scans funding rates, 24h momentum, and GM pool APYs via @gmx-io/sdk.
- * Execution via EIP-712 signed orders with Gelato Relay (gasless, MEV-protected).
+ * Scans funding rates, OI-based momentum, and GM pool utilization via @gmx-io/sdk.
+ * Signal-only today; execution layer planned via EIP-712 signed orders.
  */
 
+import type { GmxConfig } from "./types.js";
+
 export { scanFunding, scanMomentum, scanGmPools } from "./strategies.js";
-export type { GmxSdkLike } from "./strategies.js";
+export type { GmxSdkLike, MarketInfoLike, TickerEntry } from "./strategies.js";
 export { loadLedger, saveLedger } from "./ledger.js";
 export type { GmxSignal, GmxLedger, GmxConfig } from "./types.js";
 
@@ -36,5 +38,3 @@ export function buildGmxConfig(): GmxConfig {
     gmMinApy: safeFloat(process.env.GMX_GM_MIN_APY, 10),
   };
 }
-
-import type { GmxConfig } from "./types.js";

@@ -9,6 +9,7 @@ An autonomous agent that trades to fund ecological regeneration. It trades REGEN
 - Places tiered stink bids on Hydrex (Base) to accumulate REGEN at discounts
 - Trades Polymarket prediction markets using 4 AI-scored strategies
 - Trades Hyperliquid perps on funding rate and momentum signals
+- Scans GMX V2 perpetuals on Arbitrum — funding capture, OI momentum, GM pool yield
 - Routes trading surplus to REGEN accumulation + ecological credit retirement
 - Scores all trades via LITCREDIT relay (burns compute tokens for AI inference)
 - Reports everything via Telegram
@@ -328,7 +329,7 @@ npm run test:watch      # Watch mode
 npm run test:coverage   # Run with coverage report
 ```
 
-147 tests covering z-score logic, alert thresholds, deduplication, persistence, schema validation, MCP retry logic, Telegram formatting, scheduler timing, and full integration cycles. All tests are isolated — no network calls, no writes to real `data/`.
+395 tests across 43 suites covering z-score logic, alert thresholds, deduplication, persistence, schema validation, MCP retry logic, Telegram formatting, scheduler timing, GMX/Hyperliquid/Polymarket venue strategies, and full integration cycles. All tests are isolated — no network calls, no writes to real `data/`.
 
 ## Threshold Tuning
 
