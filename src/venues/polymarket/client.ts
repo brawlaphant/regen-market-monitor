@@ -31,7 +31,8 @@ export class PolymarketClient {
       throw new Error(`Polymarket API ${res.status}: ${body.substring(0, 100)}`);
     }
 
-    const events = (await res.json()) as PolymarketEvent[];
+    const raw = await res.json();
+    const events = Array.isArray(raw) ? (raw as PolymarketEvent[]) : [];
     const markets: PolymarketMarket[] = [];
 
     for (const event of events) {
@@ -54,7 +55,10 @@ export class PolymarketClient {
     if (!market.outcomePrices) return null;
     try {
       const prices = JSON.parse(market.outcomePrices) as string[];
-      if (prices.length >= 1) return parseFloat(prices[0]);
+      if (prices.length >= 1) {
+        const val = parseFloat(prices[0]);
+        return isNaN(val) ? null : val;
+      }
     } catch { /* malformed */ }
     return null;
   }

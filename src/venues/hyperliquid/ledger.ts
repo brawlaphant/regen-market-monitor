@@ -12,7 +12,9 @@ export function loadLedger(dataDir: string): HyperliquidLedger {
   const file = path.join(dir, `ledger-${today}.json`);
   if (fs.existsSync(file)) {
     try {
-      return JSON.parse(fs.readFileSync(file, "utf-8")) as HyperliquidLedger;
+      const data = JSON.parse(fs.readFileSync(file, "utf-8")) as HyperliquidLedger;
+      // Date guard: only load if ledger matches today
+      if (data.date === today) return data;
     } catch { /* corrupt, start fresh */ }
   }
   return { date: today, spent_usd: 0, trades: [] };
@@ -22,5 +24,8 @@ export function saveLedger(dataDir: string, ledger: HyperliquidLedger): void {
   const dir = path.join(dataDir, "hyperliquid");
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `ledger-${ledger.date}.json`);
-  fs.writeFileSync(file, JSON.stringify(ledger, null, 2));
+  // Atomic write: tmp then rename
+  const tmp = file + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(ledger, null, 2));
+  fs.renameSync(tmp, file);
 }

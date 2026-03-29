@@ -79,12 +79,11 @@ export class MultiVenueOrchestrator {
     this.regenPct = parseFloat(process.env.TRADING_DESK_REGEN_PCT || "20") / 100;
   }
 
-  /** Run all venue strategies and return combined results */
-  async run(): Promise<MultiVenueRunResult> {
+  /** Run all venue strategies and return combined results.
+   *  @param dryRun If true (default), scan only — no execution.
+   */
+  async run(dryRun = true): Promise<MultiVenueRunResult> {
     const results: VenueResult[] = [];
-    const startBurns = this.scorer.isConfigured
-      ? 0 // burn tracking is in the relay client
-      : 0;
 
     // Run venues — Polymarket and Hyperliquid can run in parallel
     const [polyResult, hlResult] = await Promise.allSettled([
@@ -92,11 +91,14 @@ export class MultiVenueOrchestrator {
       this.runHyperliquid(),
     ]);
 
+    const rejectMsg = (reason: unknown): string =>
+      reason instanceof Error ? reason.message : "unknown error";
+
     if (polyResult.status === "fulfilled") results.push(polyResult.value);
-    else results.push({ venue: "polymarket", signals_found: 0, trades_executed: 0, spent_usd: 0, realized_pnl: 0, errors: [String(polyResult.reason)] });
+    else results.push({ venue: "polymarket", signals_found: 0, trades_executed: 0, spent_usd: 0, realized_pnl: 0, errors: [rejectMsg(polyResult.reason)] });
 
     if (hlResult.status === "fulfilled") results.push(hlResult.value);
-    else results.push({ venue: "hyperliquid", signals_found: 0, trades_executed: 0, spent_usd: 0, realized_pnl: 0, errors: [String(hlResult.reason)] });
+    else results.push({ venue: "hyperliquid", signals_found: 0, trades_executed: 0, spent_usd: 0, realized_pnl: 0, errors: [rejectMsg(hlResult.reason)] });
 
     // Record P&L for each venue
     for (const r of results) {
@@ -214,29 +216,31 @@ export class MultiVenueOrchestrator {
       };
       await sdk.connect();
 
-      const fundingSignals = await scanFunding(sdk, config, this.logger);
-      const momentumSignals = await scanMomentum(sdk, config, this.logger);
+      try {
+        const fundingSignals = await scanFunding(sdk, config, this.logger);
+        const momentumSignals = await scanMomentum(sdk, config, this.logger);
 
-      const allSignals: HyperliquidSignal[] = [...fundingSignals, ...momentumSignals];
-      allSignals.sort((a, b) => {
-        if (a.strategy === "funding" && b.strategy !== "funding") return -1;
-        if (b.strategy === "funding" && a.strategy !== "funding") return 1;
-        return b.size_usd - a.size_usd;
-      });
+        const allSignals: HyperliquidSignal[] = [...fundingSignals, ...momentumSignals];
+        allSignals.sort((a, b) => {
+          if (a.strategy === "funding" && b.strategy !== "funding") return -1;
+          if (b.strategy === "funding" && a.strategy !== "funding") return 1;
+          return b.size_usd - a.size_usd;
+        });
 
-      result.signals_found = allSignals.length;
+        result.signals_found = allSignals.length;
 
-      // Track in ledger
-      const ledger = loadLedger(this.dataDir);
-      // Signal-only for now — execution goes through the Hyperliquid SDK
-      saveLedger(this.dataDir, ledger);
+        // Track in ledger
+        const ledger = loadLedger(this.dataDir);
+        // Signal-only for now — execution goes through the Hyperliquid SDK
+        saveLedger(this.dataDir, ledger);
 
-      sdk.disconnect();
-
-      this.logger.info(
-        { funding: fundingSignals.length, momentum: momentumSignals.length },
-        "Hyperliquid scan complete"
-      );
+        this.logger.info(
+          { funding: fundingSignals.length, momentum: momentumSignals.length },
+          "Hyperliquid scan complete"
+        );
+      } finally {
+        sdk.disconnect();
+      }
     } catch (err) {
       result.errors.push(err instanceof Error ? err.message : String(err));
       this.logger.warn({ err }, "Hyperliquid venue run failed");
@@ -252,10 +256,12 @@ export class MultiVenueOrchestrator {
       const dir = path.join(this.dataDir, "trading-desk");
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-      fs.writeFileSync(
-        path.join(dir, `run-${stamp}.json`),
-        JSON.stringify(result, null, 2)
-      );
-    } catch { /* non-critical */ }
+      const file = path.join(dir, `run-${stamp}.json`);
+      const tmp = file + ".tmp";
+      fs.writeFileSync(tmp, JSON.stringify(result, null, 2));
+      fs.renameSync(tmp, file);
+    } catch (err) {
+      this.logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Artifact save failed");
+    }
   }
 }

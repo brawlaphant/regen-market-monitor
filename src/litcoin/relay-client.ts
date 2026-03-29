@@ -131,11 +131,12 @@ export class RelayClient {
 
       if (res.ok) {
         const data = (await res.json()) as Record<string, unknown>;
+        const escrowBalance = typeof data.escrow_balance === "number" ? data.escrow_balance : null;
         this.lastHealth = {
           reachable: true,
           latency_ms: Date.now() - start,
           relay_providers_online: (data.relay_providers_online as number) || 0,
-          escrow_sufficient: true,
+          escrow_sufficient: escrowBalance !== null ? escrowBalance > 10 : true,
           last_check: new Date().toISOString(),
         };
       } else {
@@ -188,6 +189,10 @@ export class RelayClient {
 
   private recordBurn(burn: LitcreditBurn): void {
     this.refreshLedger();
+    // Cap burn history to prevent unbounded memory growth within a day
+    if (this.burnLedger.burns.length >= 5000) {
+      this.burnLedger.burns.shift();
+    }
     this.burnLedger.burns.push(burn);
     this.burnLedger.total_burns++;
     this.burnLedger.total_litcredit += burn.litcredit_cost;
@@ -222,7 +227,9 @@ export class RelayClient {
         const data = JSON.parse(fs.readFileSync(file, "utf-8")) as BurnLedger;
         if (data.date === today) return data;
       }
-    } catch { /* corrupt, start fresh */ }
+    } catch (err) {
+      this.logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Corrupt burn ledger — starting fresh");
+    }
     return { date: today, total_burns: 0, total_litcredit: 0, total_tokens: 0, burns: [] };
   }
 
@@ -231,7 +238,11 @@ export class RelayClient {
       const dir = path.join(this.dataDir, "litcoin");
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const file = path.join(dir, `burn-ledger-${this.burnLedger.date}.json`);
-      fs.writeFileSync(file, JSON.stringify(this.burnLedger, null, 2));
-    } catch { /* non-critical */ }
+      const tmp = file + ".tmp";
+      fs.writeFileSync(tmp, JSON.stringify(this.burnLedger, null, 2));
+      fs.renameSync(tmp, file);
+    } catch (err) {
+      this.logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Burn ledger save failed");
+    }
   }
 }

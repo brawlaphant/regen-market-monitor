@@ -40,13 +40,16 @@ export function buildRelayConfig(): {
   if (wallet) authMethod = "wallet";
   else if (apiKey) authMethod = "key";
 
+  const timeoutMs = parseInt(process.env.LITCREDIT_TIMEOUT_MS || "45000", 10);
+  const retryTimeoutMs = parseInt(process.env.LITCREDIT_RETRY_TIMEOUT_MS || "120000", 10);
+
   return {
     baseUrl,
     authMethod,
     wallet: wallet || undefined,
     apiKey: apiKey || undefined,
-    timeoutMs: parseInt(process.env.LITCREDIT_TIMEOUT_MS || "45000", 10),
-    retryTimeoutMs: parseInt(process.env.LITCREDIT_RETRY_TIMEOUT_MS || "120000", 10),
+    timeoutMs: isNaN(timeoutMs) ? 45000 : timeoutMs,
+    retryTimeoutMs: isNaN(retryTimeoutMs) ? 120000 : retryTimeoutMs,
     model: process.env.LITCREDIT_MODEL || "auto",
   };
 }

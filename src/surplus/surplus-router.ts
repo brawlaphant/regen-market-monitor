@@ -146,7 +146,9 @@ export class SurplusRouter {
       if (fs.existsSync(file)) {
         return JSON.parse(fs.readFileSync(file, "utf-8")) as PnlState;
       }
-    } catch { /* corrupt */ }
+    } catch (err) {
+      this.logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Corrupt P&L state — starting fresh");
+    }
     return {
       date: new Date().toISOString().slice(0, 10),
       venues: {},
@@ -160,10 +162,12 @@ export class SurplusRouter {
     try {
       const dir = this.dataDir;
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(
-        path.join(dir, "pnl-state.json"),
-        JSON.stringify(this.state, null, 2)
-      );
-    } catch { /* non-critical */ }
+      const file = path.join(dir, "pnl-state.json");
+      const tmp = file + ".tmp";
+      fs.writeFileSync(tmp, JSON.stringify(this.state, null, 2));
+      fs.renameSync(tmp, file);
+    } catch (err) {
+      this.logger.warn({ err: err instanceof Error ? err.message : String(err) }, "P&L state save failed");
+    }
   }
 }

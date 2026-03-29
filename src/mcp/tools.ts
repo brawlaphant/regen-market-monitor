@@ -159,7 +159,8 @@ export class McpToolSurface {
       },
       handler: async (input) => {
         if (!this.orchestrator) return { error: "Multi-venue orchestrator not configured" };
-        const result = await this.orchestrator.run();
+        const dryRun = input.dry_run !== false; // default true
+        const result = await this.orchestrator.run(dryRun);
         return result;
       },
     };
