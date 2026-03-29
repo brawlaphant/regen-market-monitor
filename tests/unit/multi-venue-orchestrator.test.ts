@@ -47,7 +47,7 @@ describe("MultiVenueOrchestrator", () => {
 
     const result = await orch.run();
     expect(result.timestamp).toBeDefined();
-    expect(result.venues).toHaveLength(2);
+    expect(result.venues).toHaveLength(3);
 
     const polyResult = result.venues.find(v => v.venue === "polymarket");
     expect(polyResult).toBeDefined();
@@ -127,8 +127,8 @@ describe("MultiVenueOrchestrator", () => {
 
     // Should not throw regardless of dryRun value
     const r1 = await orch.run(true);
-    expect(r1.venues).toHaveLength(2);
+    expect(r1.venues).toHaveLength(3);
     const r2 = await orch.run(false);
-    expect(r2.venues).toHaveLength(2);
+    expect(r2.venues).toHaveLength(3);
   });
 });

@@ -5,8 +5,9 @@
  * three venues: REGEN (accumulation + Coinstore), Polymarket, Hyperliquid.
  *
  * Budget allocation (env-tunable):
- * - Hyperliquid: 40% of daily cap
- * - Polymarket: 40% of daily cap
+ * - Hyperliquid: 25% of daily cap
+ * - Polymarket: 30% of daily cap
+ * - GMX: 25% of daily cap
  * - REGEN: 20% of daily cap
  *
  * Surplus from trading P&L routes to extra REGEN accumulation.
@@ -34,6 +35,15 @@ import {
   buildHyperliquidConfig,
 } from "../venues/hyperliquid/index.js";
 import type { HyperliquidSignal } from "../venues/hyperliquid/types.js";
+import {
+  scanFunding as gmxScanFunding,
+  scanMomentum as gmxScanMomentum,
+  scanGmPools,
+  loadLedger as gmxLoadLedger,
+  saveLedger as gmxSaveLedger,
+  buildGmxConfig,
+} from "../venues/gmx/index.js";
+import type { GmxSignal } from "../venues/gmx/types.js";
 
 export interface VenueResult {
   venue: string;
@@ -60,6 +70,7 @@ export class MultiVenueOrchestrator {
   private dailyCap: number;
   private hlPct: number;
   private polyPct: number;
+  private gmxPct: number;
   private regenPct: number;
 
   constructor(
@@ -74,8 +85,9 @@ export class MultiVenueOrchestrator {
     this.logger = logger;
 
     this.dailyCap = parseFloat(process.env.TRADING_DESK_DAILY_CAP || "150");
-    this.hlPct = parseFloat(process.env.TRADING_DESK_HL_PCT || "40") / 100;
-    this.polyPct = parseFloat(process.env.TRADING_DESK_POLY_PCT || "40") / 100;
+    this.hlPct = parseFloat(process.env.TRADING_DESK_HL_PCT || "25") / 100;
+    this.polyPct = parseFloat(process.env.TRADING_DESK_POLY_PCT || "30") / 100;
+    this.gmxPct = parseFloat(process.env.TRADING_DESK_GMX_PCT || "25") / 100;
     this.regenPct = parseFloat(process.env.TRADING_DESK_REGEN_PCT || "20") / 100;
   }
 
@@ -85,20 +97,26 @@ export class MultiVenueOrchestrator {
   async run(dryRun = true): Promise<MultiVenueRunResult> {
     const results: VenueResult[] = [];
 
-    // Run venues — Polymarket and Hyperliquid can run in parallel
-    const [polyResult, hlResult] = await Promise.allSettled([
+    // Run all venues in parallel
+    const [polyResult, hlResult, gmxResult] = await Promise.allSettled([
       this.runPolymarket(),
       this.runHyperliquid(),
+      this.runGmx(),
     ]);
 
     const rejectMsg = (reason: unknown): string =>
       reason instanceof Error ? reason.message : "unknown error";
+    const emptyResult = (venue: string, reason: unknown): VenueResult =>
+      ({ venue, signals_found: 0, trades_executed: 0, spent_usd: 0, realized_pnl: 0, errors: [rejectMsg(reason)] });
 
     if (polyResult.status === "fulfilled") results.push(polyResult.value);
-    else results.push({ venue: "polymarket", signals_found: 0, trades_executed: 0, spent_usd: 0, realized_pnl: 0, errors: [rejectMsg(polyResult.reason)] });
+    else results.push(emptyResult("polymarket", polyResult.reason));
 
     if (hlResult.status === "fulfilled") results.push(hlResult.value);
-    else results.push({ venue: "hyperliquid", signals_found: 0, trades_executed: 0, spent_usd: 0, realized_pnl: 0, errors: [rejectMsg(hlResult.reason)] });
+    else results.push(emptyResult("hyperliquid", hlResult.reason));
+
+    if (gmxResult.status === "fulfilled") results.push(gmxResult.value);
+    else results.push(emptyResult("gmx", gmxResult.reason));
 
     // Record P&L for each venue
     for (const r of results) {
@@ -231,6 +249,50 @@ export class MultiVenueOrchestrator {
     } catch (err) {
       result.errors.push(err instanceof Error ? err.message : String(err));
       this.logger.warn({ err }, "Hyperliquid venue run failed");
+    }
+
+    return result;
+  }
+
+  private async runGmx(): Promise<VenueResult> {
+    const result: VenueResult = {
+      venue: "gmx",
+      signals_found: 0,
+      trades_executed: 0,
+      spent_usd: 0,
+      realized_pnl: 0,
+      errors: [],
+    };
+
+    const config = buildGmxConfig();
+
+    try {
+      const { GmxSdk } = await import("@gmx-io/sdk");
+      const sdk = new GmxSdk({ chainId: config.chainId });
+
+      const fundingSignals = await gmxScanFunding(sdk, config, this.logger);
+      const momentumSignals = await gmxScanMomentum(sdk, config, this.logger);
+      const poolSignals = await scanGmPools(sdk, config, this.logger);
+
+      const allSignals: GmxSignal[] = [...fundingSignals, ...momentumSignals, ...poolSignals];
+      allSignals.sort((a, b) => {
+        if (a.strategy === "funding" && b.strategy !== "funding") return -1;
+        if (b.strategy === "funding" && a.strategy !== "funding") return 1;
+        return b.size_usd - a.size_usd;
+      });
+
+      result.signals_found = allSignals.length;
+
+      const ledger = gmxLoadLedger(this.dataDir);
+      gmxSaveLedger(this.dataDir, ledger);
+
+      this.logger.info(
+        { funding: fundingSignals.length, momentum: momentumSignals.length, pools: poolSignals.length },
+        "GMX scan complete"
+      );
+    } catch (err) {
+      result.errors.push(err instanceof Error ? err.message : String(err));
+      this.logger.warn({ err }, "GMX venue run failed");
     }
 
     return result;
