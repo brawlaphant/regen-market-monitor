@@ -2,9 +2,10 @@ import { describe, it, expect } from "vitest";
 import { scanFunding, scanMomentum, scanGmPools } from "../../src/venues/gmx/strategies.js";
 import type { GmxConfig } from "../../src/venues/gmx/types.js";
 import type { GmxSdkLike, MarketInfoLike, TickerEntry } from "../../src/venues/gmx/strategies.js";
+import type { Logger } from "../../src/logger.js";
 
-function mockLogger(): any {
-  return { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
+function mockLogger(): Logger {
+  return { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, fatal: () => {}, trace: () => {}, child: () => mockLogger(), level: "silent" } as unknown as Logger;
 }
 
 const defaultConfig: GmxConfig = {

@@ -123,11 +123,11 @@ async function main() {
             if (m.significance === "critical" || m.significance === "high") {
               try {
                 const { buildSignal } = await import("./signals/signal-factory.js");
-                const sig = buildSignal("WHALE_MOVEMENT" as any, {
+                const sig = buildSignal("WHALE_MOVEMENT", {
                   wallet_label: m.wallet_label, wallet_tier: m.wallet_tier,
                   movement_type: m.movement_type, amount_regen: m.amount_regen,
                   amount_usd: m.amount_usd, chain: m.chain, significance: m.significance,
-                } as any, { triggered_by: "event_watcher", workflow_id: "whale-tracker" }, signalPublisher.configuredChannels);
+                }, { triggered_by: "event_watcher", workflow_id: "whale-tracker" }, signalPublisher.configuredChannels);
                 await signalPublisher.publish(sig);
               } catch (sigErr) { logger.warn({ sigErr }, "Whale movement signal publish failed"); }
             }
@@ -135,11 +135,11 @@ async function main() {
           if (report.patterns_detected.length > 0) {
             try {
               const { buildSignal } = await import("./signals/signal-factory.js");
-              const sig = buildSignal("WHALE_PATTERN" as any, {
-                pattern_type: report.patterns_detected[0], dominant_signal: report.dominant_signal,
+              const sig = buildSignal("WHALE_PATTERN", {
+                pattern_type: report.patterns_detected[0].type, dominant_signal: report.dominant_signal,
                 confidence: report.confidence, affected_wallets: report.affected_wallets.length,
                 summary: report.summary,
-              } as any, { triggered_by: "event_watcher", workflow_id: "whale-tracker" }, signalPublisher.configuredChannels);
+              }, { triggered_by: "event_watcher", workflow_id: "whale-tracker" }, signalPublisher.configuredChannels);
               await signalPublisher.publish(sig);
             } catch (sigErr) { logger.warn({ sigErr }, "Whale pattern signal publish failed"); }
           }
@@ -291,7 +291,13 @@ async function main() {
   scheduler.onCrossChainSignal = async (type, data) => {
     try {
       const { buildSignal } = await import("./signals/signal-factory.js");
-      const signal = buildSignal(type as any, data as any, { triggered_by: "scheduled_poll", workflow_id: "cross-chain" }, signalPublisher.configuredChannels);
+      // type + data come from scheduler callbacks typed as string/Record — cast at boundary
+      const signal = buildSignal(
+        type as import("./signals/signal-schema.js").SignalType,
+        data as unknown as import("./signals/signal-schema.js").SignalData,
+        { triggered_by: "scheduled_poll", workflow_id: "cross-chain" },
+        signalPublisher.configuredChannels,
+      );
       await signalPublisher.publish(signal);
     } catch (err) { logger.warn({ err, type }, "Cross-chain signal publish failed"); }
   };

@@ -1,5 +1,8 @@
 /**
- * Polymarket Execution Adapter
+ * Polymarket Execution Adapter — pre-built, not yet wired into the orchestrator.
+ *
+ * Wire into MultiVenueOrchestrator.runPolymarket() when CLOB credentials are
+ * configured and signal quality has been validated in paper mode.
  *
  * Places real orders on Polymarket's CLOB via @polymarket/clob-client.
  * Risk controls: daily spend cap, per-trade max, min liquidity, max spread, cooldown.
@@ -12,8 +15,8 @@ import path from "node:path";
 import type { Logger } from "../../logger.js";
 import type { ScoredMarket } from "./types.js";
 
-const CLOB_BASE = "https://clob.polymarket.com";
-const CHAIN_ID = 137; // Polygon mainnet
+const CLOB_BASE = process.env.POLYMARKET_CLOB_URL || "https://clob.polymarket.com";
+const CHAIN_ID = parseInt(process.env.POLYMARKET_CHAIN_ID || "137", 10); // Polygon mainnet
 
 export interface PolymarketExecutorConfig {
   privateKey?: string;

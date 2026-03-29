@@ -149,19 +149,11 @@ export class McpToolSurface {
   private runTradingDesk(): McpToolDef {
     return {
       name: "run_trading_desk",
-      description: "Trigger a multi-venue trading scan across Polymarket + Hyperliquid. Scans for signals, scores via LITCREDIT, and reports results. Does NOT auto-execute trades unless explicitly configured.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          dry_run: { type: "boolean", description: "If true, scan only — no execution (default: true)" },
-        },
-        required: [],
-      },
-      handler: async (input) => {
+      description: "Trigger a multi-venue trading scan across Polymarket, Hyperliquid, and GMX. Scans for signals, scores via LITCREDIT, and reports results. All venues are signal-only; execution is configured per-venue.",
+      inputSchema: { type: "object", properties: {}, required: [] },
+      handler: async () => {
         if (!this.orchestrator) return { error: "Multi-venue orchestrator not configured" };
-        const dryRun = input.dry_run !== false; // default true
-        const result = await this.orchestrator.run(dryRun);
-        return result;
+        return this.orchestrator.run();
       },
     };
   }

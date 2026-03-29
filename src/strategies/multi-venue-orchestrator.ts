@@ -1,14 +1,11 @@
 /**
  * Multi-Venue Strategy Orchestrator
  *
- * Extends the existing REGEN-only orchestrator to coordinate across
- * three venues: REGEN (accumulation + Coinstore), Polymarket, Hyperliquid.
+ * Coordinates signal scanning across four venues:
+ * Polymarket, Hyperliquid, GMX, and REGEN (accumulation + Coinstore).
  *
- * Budget allocation (env-tunable):
- * - Hyperliquid: 25% of daily cap
- * - Polymarket: 30% of daily cap
- * - GMX: 25% of daily cap
- * - REGEN: 20% of daily cap
+ * All venues are signal-only today. Per-venue budget caps are configured
+ * via each venue's own env vars (e.g. GMX_DAILY_CAP, POLYMARKET_DAILY_CAP).
  *
  * Surplus from trading P&L routes to extra REGEN accumulation.
  */
@@ -66,6 +63,7 @@ export class MultiVenueOrchestrator {
   private scorer: LitcreditScorer;
   private surplus: SurplusRouter;
   private dataDir: string;
+  private polyClient: PolymarketClient | null = null;
 
   constructor(
     scorer: LitcreditScorer,
@@ -80,9 +78,10 @@ export class MultiVenueOrchestrator {
   }
 
   /** Run all venue strategies and return combined results.
-   *  @param dryRun If true (default), scan only — no execution.
+   *  All venues are signal-only today — execution adapters will be wired per-venue
+   *  when wallets are funded and signal quality is proven.
    */
-  async run(dryRun = true): Promise<MultiVenueRunResult> {
+  async run(): Promise<MultiVenueRunResult> {
     const results: VenueResult[] = [];
 
     // Run all venues in parallel
@@ -147,8 +146,8 @@ export class MultiVenueOrchestrator {
     }
 
     try {
-      const client = new PolymarketClient(this.logger);
-      const markets = await client.fetchMarkets(80);
+      if (!this.polyClient) this.polyClient = new PolymarketClient(this.logger);
+      const markets = await this.polyClient.fetchMarkets(80);
 
       if (markets.length === 0) {
         result.errors.push("No active markets found");
@@ -159,10 +158,10 @@ export class MultiVenueOrchestrator {
       const allSignals: ScoredMarket[] = [];
 
       const [spray, worldview, contrarian, closer] = await Promise.allSettled([
-        runSpray(markets, client, this.scorer),
-        runWorldview(markets, client, this.scorer),
-        runContrarian(markets, client, this.scorer),
-        runCloser(markets, client, this.scorer),
+        runSpray(markets, this.polyClient!, this.scorer),
+        runWorldview(markets, this.polyClient!, this.scorer),
+        runContrarian(markets, this.polyClient!, this.scorer),
+        runCloser(markets, this.polyClient!, this.scorer),
       ]);
 
       if (spray.status === "fulfilled") allSignals.push(...spray.value);
@@ -204,10 +203,12 @@ export class MultiVenueOrchestrator {
     try {
       const { Hyperliquid } = await import("hyperliquid");
 
-      const sdkConfig: ConstructorParameters<typeof Hyperliquid>[0] = { enableWs: false };
-      if (config.privateKey) (sdkConfig as Record<string, unknown>).privateKey = config.privateKey;
-      const sdk = new Hyperliquid(sdkConfig);
+      const sdkConfig: Record<string, unknown> = { enableWs: false };
+      if (config.privateKey) sdkConfig.privateKey = config.privateKey;
+      const sdk = new Hyperliquid(sdkConfig as ConstructorParameters<typeof Hyperliquid>[0]);
+      let connected = false;
       await sdk.connect();
+      connected = true;
 
       try {
         const fundingSignals = await scanFunding(sdk, config, this.logger);
@@ -222,9 +223,7 @@ export class MultiVenueOrchestrator {
 
         result.signals_found = allSignals.length;
 
-        // Track in ledger
         const ledger = loadLedger(this.dataDir);
-        // Signal-only for now — execution goes through the Hyperliquid SDK
         saveLedger(this.dataDir, ledger);
 
         this.logger.info(
@@ -232,7 +231,7 @@ export class MultiVenueOrchestrator {
           "Hyperliquid scan complete"
         );
       } finally {
-        sdk.disconnect();
+        if (connected) sdk.disconnect();
       }
     } catch (err) {
       result.errors.push(err instanceof Error ? err.message : String(err));

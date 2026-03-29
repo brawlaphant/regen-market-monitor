@@ -47,8 +47,8 @@ async function main(): Promise<void> {
     logger.warn("Relay unreachable — signals may be limited");
   }
 
-  // Run all venues
-  const result = await orchestrator.run(dryRun);
+  // Run all venues (signal-only; per-venue execution controlled by venue configs)
+  const result = await orchestrator.run();
 
   // Report
   const totalSignals = result.venues.reduce((s, v) => s + v.signals_found, 0);
