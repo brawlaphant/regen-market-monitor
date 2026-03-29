@@ -6,8 +6,8 @@ import { MultiVenueOrchestrator } from "../../src/strategies/multi-venue-orchest
 import { SurplusRouter } from "../../src/surplus/surplus-router.js";
 import type { LitcreditScorer } from "../../src/scoring/litcredit-provider.js";
 
-function mockLogger(): any {
-  return { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
+function mockLogger(): import("../../src/logger.js").Logger {
+  return { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, fatal: () => {}, trace: () => {}, child: () => mockLogger(), level: "silent" } as unknown as import("../../src/logger.js").Logger;
 }
 
 function makeScorer(configured: boolean): LitcreditScorer {
@@ -47,7 +47,7 @@ describe("MultiVenueOrchestrator", () => {
 
     const result = await orch.run();
     expect(result.timestamp).toBeDefined();
-    expect(result.venues).toHaveLength(2);
+    expect(result.venues).toHaveLength(3);
 
     const polyResult = result.venues.find(v => v.venue === "polymarket");
     expect(polyResult).toBeDefined();
@@ -116,7 +116,7 @@ describe("MultiVenueOrchestrator", () => {
     expect(result.surplus_allocation.reason).toBeDefined();
   });
 
-  it("accepts dryRun parameter", async () => {
+  it("runs multiple times without error", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true, json: async () => [],
     }));
@@ -125,10 +125,9 @@ describe("MultiVenueOrchestrator", () => {
     const surplus = new SurplusRouter(tmpDir, mockLogger());
     const orch = new MultiVenueOrchestrator(scorer, surplus, tmpDir, mockLogger());
 
-    // Should not throw regardless of dryRun value
-    const r1 = await orch.run(true);
-    expect(r1.venues).toHaveLength(2);
-    const r2 = await orch.run(false);
-    expect(r2.venues).toHaveLength(2);
+    const r1 = await orch.run();
+    expect(r1.venues).toHaveLength(3);
+    const r2 = await orch.run();
+    expect(r2.venues).toHaveLength(3);
   });
 });

@@ -109,9 +109,10 @@ async function main() {
   health.patternAnalyzer = patternAnalyzer;
 
   // Poll whale wallets on an interval
+  const pendingIntervals: ReturnType<typeof setInterval>[] = [];
   if (process.env.WHALE_ENABLED !== "false") {
     const whalePollMs = parseInt(process.env.WHALE_POLL_INTERVAL_MS || "300000", 10);
-    setInterval(async () => {
+    pendingIntervals.push(setInterval(async () => {
       try {
         const wallets = walletRegistry.getTopByBalance(50);
         const movements = await movementDetector.poll(wallets);
@@ -122,32 +123,32 @@ async function main() {
             if (m.significance === "critical" || m.significance === "high") {
               try {
                 const { buildSignal } = await import("./signals/signal-factory.js");
-                const sig = buildSignal("WHALE_MOVEMENT" as any, {
+                const sig = buildSignal("WHALE_MOVEMENT", {
                   wallet_label: m.wallet_label, wallet_tier: m.wallet_tier,
                   movement_type: m.movement_type, amount_regen: m.amount_regen,
                   amount_usd: m.amount_usd, chain: m.chain, significance: m.significance,
-                } as any, { triggered_by: "event_watcher", workflow_id: "whale-tracker" }, signalPublisher.configuredChannels);
+                }, { triggered_by: "event_watcher", workflow_id: "whale-tracker" }, signalPublisher.configuredChannels);
                 await signalPublisher.publish(sig);
-              } catch {}
+              } catch (sigErr) { logger.warn({ sigErr }, "Whale movement signal publish failed"); }
             }
           }
           if (report.patterns_detected.length > 0) {
             try {
               const { buildSignal } = await import("./signals/signal-factory.js");
-              const sig = buildSignal("WHALE_PATTERN" as any, {
-                pattern_type: report.patterns_detected[0], dominant_signal: report.dominant_signal,
+              const sig = buildSignal("WHALE_PATTERN", {
+                pattern_type: report.patterns_detected[0].type, dominant_signal: report.dominant_signal,
                 confidence: report.confidence, affected_wallets: report.affected_wallets.length,
                 summary: report.summary,
-              } as any, { triggered_by: "event_watcher", workflow_id: "whale-tracker" }, signalPublisher.configuredChannels);
+              }, { triggered_by: "event_watcher", workflow_id: "whale-tracker" }, signalPublisher.configuredChannels);
               await signalPublisher.publish(sig);
-            } catch {}
+            } catch (sigErr) { logger.warn({ sigErr }, "Whale pattern signal publish failed"); }
           }
         }
       } catch (err) { logger.warn({ err }, "Whale poll failed"); }
-    }, whalePollMs);
+    }, whalePollMs));
 
     // Refresh balances every 4 hours
-    setInterval(() => walletRegistry.refreshBalances().catch(() => {}), 4 * 3600000);
+    pendingIntervals.push(setInterval(() => walletRegistry.refreshBalances().catch(() => {}), 4 * 3600000));
     logger.info({ interval_ms: whalePollMs }, "Whale tracker active");
   }
 
@@ -196,6 +197,7 @@ async function main() {
   }
 
   // MCP tool surface — lets Claude operate the agent
+  const startedAt = Date.now();
   const mcpTools = new McpToolSurface(logger);
   mcpTools.wire({
     relay: relayClient,
@@ -203,7 +205,7 @@ async function main() {
     orchestrator: multiVenue,
     healthFn: () => ({
       status: health.lastPollAt ? (health.mcpReachable ? "ok" : "degraded") : "starting",
-      uptime: Math.round((Date.now() - Date.now()) / 1000), // placeholder
+      uptime: Math.round((Date.now() - startedAt) / 1000),
       lastPollAt: health.lastPollAt?.toISOString() ?? null,
       alertsFiredToday: health.alertsFiredToday,
     }),
@@ -212,7 +214,7 @@ async function main() {
   // Multi-venue trading desk — runs on a configurable interval
   const tradingDeskIntervalMs = parseInt(process.env.TRADING_DESK_INTERVAL_MS || "0", 10);
   if (tradingDeskIntervalMs > 0 && relayConfig.authMethod !== "none") {
-    setInterval(async () => {
+    pendingIntervals.push(setInterval(async () => {
       try {
         const result = await multiVenue.run();
         const totalSignals = result.venues.reduce((s, v) => s + v.signals_found, 0);
@@ -223,7 +225,7 @@ async function main() {
       } catch (err) {
         logger.warn({ err }, "Trading desk scan failed");
       }
-    }, tradingDeskIntervalMs);
+    }, tradingDeskIntervalMs));
     logger.info({ interval_ms: tradingDeskIntervalMs }, "Trading desk auto-scan active");
   }
 
@@ -289,7 +291,13 @@ async function main() {
   scheduler.onCrossChainSignal = async (type, data) => {
     try {
       const { buildSignal } = await import("./signals/signal-factory.js");
-      const signal = buildSignal(type as any, data as any, { triggered_by: "scheduled_poll", workflow_id: "cross-chain" }, signalPublisher.configuredChannels);
+      // type + data come from scheduler callbacks typed as string/Record — cast at boundary
+      const signal = buildSignal(
+        type as import("./signals/signal-schema.js").SignalType,
+        data as unknown as import("./signals/signal-schema.js").SignalData,
+        { triggered_by: "scheduled_poll", workflow_id: "cross-chain" },
+        signalPublisher.configuredChannels,
+      );
       await signalPublisher.publish(signal);
     } catch (err) { logger.warn({ err, type }, "Cross-chain signal publish failed"); }
   };
@@ -368,9 +376,10 @@ async function main() {
     } catch (err) { logger.warn({ err }, "Failed to produce MARKET_REPORT signal"); }
   };
 
-  // Graceful shutdown — close SSE and Redis before exit
+  // Graceful shutdown — close SSE, Redis, and background intervals before exit
   const origStop = scheduler.stop.bind(scheduler);
   scheduler.stop = async (signal?: string) => {
+    for (const handle of pendingIntervals) clearInterval(handle);
     signalPublisher.closeSseClients();
     await signalPublisher.close();
     await origStop(signal);

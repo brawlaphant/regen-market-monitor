@@ -22,6 +22,7 @@ module.exports = {
         NODE_ENV: "production",
         POLYMARKET_DRY_RUN: "true",   // paper mode by default
         HYPERLIQUID_DRY_RUN: "true",
+        GMX_DRY_RUN: "true",
       },
       max_memory_restart: "256M",
       watch: false,

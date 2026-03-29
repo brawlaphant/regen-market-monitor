@@ -22,7 +22,7 @@ export function cleanArtifacts(
   retentionDays = DEFAULT_RETENTION_DAYS
 ): { removed: number; errors: number } {
   const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
-  const subdirs = ["trading-desk", "litcoin", "hyperliquid"];
+  const subdirs = ["trading-desk", "litcoin", "hyperliquid", "gmx"];
   let removed = 0;
   let errors = 0;
 

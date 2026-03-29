@@ -96,12 +96,19 @@ export class SurplusRouter {
     };
   }
 
-  /** Mark surplus as routed (after successful REGEN accumulation) */
+  /** Mark surplus as routed (after successful REGEN accumulation).
+   *  Guards against double-routing: amount is capped at what calculateSurplus() would suggest. */
   markRouted(amount: number): void {
-    this.state.cumulative_surplus_routed_usd += amount;
+    const calc = this.calculateSurplus();
+    const capped = Math.min(amount, calc.routed_to_regen_usd);
+    if (capped <= 0) {
+      this.logger.warn({ requested: amount, available: calc.routed_to_regen_usd }, "markRouted called with no available surplus — skipping");
+      return;
+    }
+    this.state.cumulative_surplus_routed_usd += capped;
     this.state.last_updated = new Date().toISOString();
     this.saveState();
-    this.logger.info({ amount, total_routed: this.state.cumulative_surplus_routed_usd }, "Surplus routed to REGEN");
+    this.logger.info({ amount: capped, total_routed: this.state.cumulative_surplus_routed_usd }, "Surplus routed to REGEN");
   }
 
   /** Get current P&L state */
