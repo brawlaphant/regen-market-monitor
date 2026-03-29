@@ -1,10 +1,19 @@
-# regen-market-monitor
+# Regenerative Trading Agent
 
 [![CI](https://github.com/brawlaphant/regen-market-monitor/actions/workflows/test.yml/badge.svg)](https://github.com/brawlaphant/regen-market-monitor/actions/workflows/test.yml)
 
-Autonomous ElizaOS agent that monitors Regen Network ecocredit market conditions. Implements **AGENT-003 (RegenMarketMonitor)** from the [Regen Network Agentic Tokenomics](https://github.com/regen-network/agentic-tokenomics) specification — four OODA-loop workflows that detect price anomalies, assess liquidity, analyze retirement patterns, and score curation quality, with configurable alerts delivered via Telegram.
+An autonomous agent that trades to fund ecological regeneration. It trades REGEN on-chain, trades Polymarket and Hyperliquid for profit, and routes surplus to REGEN accumulation and credit retirement. Every AI inference call burns LITCREDIT — structural demand for the compute network.
 
-Includes an **on-chain action layer** that can build and submit governance proposals to freeze suspicious sell orders — always gated by explicit human approval.
+**What it does:**
+- Monitors REGEN across 6 venues on 4 chains (Regen, Osmosis, Base, CoinGecko)
+- Places tiered stink bids on Hydrex (Base) to accumulate REGEN at discounts
+- Trades Polymarket prediction markets using 4 AI-scored strategies
+- Trades Hyperliquid perps on funding rate and momentum signals
+- Routes trading surplus to REGEN accumulation + ecological credit retirement
+- Scores all trades via LITCREDIT relay (burns compute tokens for AI inference)
+- Reports everything via Telegram
+
+**The game:** trading profits pay for ecological regeneration. The agent gets smarter as inference gets cheaper. House edge is permanent.
 
 ## Quick Start
 
@@ -13,8 +22,25 @@ git clone https://github.com/brawlaphant/regen-market-monitor.git
 cd regen-market-monitor
 npm install
 cp .env.example .env
-# Edit .env — set REGEN_COMPUTE_MCP_URL at minimum
+# Edit .env — set REGEN_COMPUTE_MCP_URL + LITCOIN_WALLET or LITCOIN_RELAY_KEY
 npm run build && npm start
+```
+
+### Docker
+
+```bash
+cp .env.example .env   # edit with your keys
+docker compose up -d   # monitor + health endpoint
+
+# Run the trading desk (one-shot scan):
+docker compose --profile trading run --rm trading-desk
+```
+
+### PM2 (production)
+
+```bash
+npm run build
+pm2 start ecosystem.config.cjs   # monitor (persistent) + trading desk (4hr cron)
 ```
 
 ## Configuration
