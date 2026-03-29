@@ -109,9 +109,10 @@ async function main() {
   health.patternAnalyzer = patternAnalyzer;
 
   // Poll whale wallets on an interval
+  const pendingIntervals: ReturnType<typeof setInterval>[] = [];
   if (process.env.WHALE_ENABLED !== "false") {
     const whalePollMs = parseInt(process.env.WHALE_POLL_INTERVAL_MS || "300000", 10);
-    setInterval(async () => {
+    pendingIntervals.push(setInterval(async () => {
       try {
         const wallets = walletRegistry.getTopByBalance(50);
         const movements = await movementDetector.poll(wallets);
@@ -128,7 +129,7 @@ async function main() {
                   amount_usd: m.amount_usd, chain: m.chain, significance: m.significance,
                 } as any, { triggered_by: "event_watcher", workflow_id: "whale-tracker" }, signalPublisher.configuredChannels);
                 await signalPublisher.publish(sig);
-              } catch {}
+              } catch (sigErr) { logger.warn({ sigErr }, "Whale movement signal publish failed"); }
             }
           }
           if (report.patterns_detected.length > 0) {
@@ -140,14 +141,14 @@ async function main() {
                 summary: report.summary,
               } as any, { triggered_by: "event_watcher", workflow_id: "whale-tracker" }, signalPublisher.configuredChannels);
               await signalPublisher.publish(sig);
-            } catch {}
+            } catch (sigErr) { logger.warn({ sigErr }, "Whale pattern signal publish failed"); }
           }
         }
       } catch (err) { logger.warn({ err }, "Whale poll failed"); }
-    }, whalePollMs);
+    }, whalePollMs));
 
     // Refresh balances every 4 hours
-    setInterval(() => walletRegistry.refreshBalances().catch(() => {}), 4 * 3600000);
+    pendingIntervals.push(setInterval(() => walletRegistry.refreshBalances().catch(() => {}), 4 * 3600000));
     logger.info({ interval_ms: whalePollMs }, "Whale tracker active");
   }
 
@@ -213,7 +214,7 @@ async function main() {
   // Multi-venue trading desk — runs on a configurable interval
   const tradingDeskIntervalMs = parseInt(process.env.TRADING_DESK_INTERVAL_MS || "0", 10);
   if (tradingDeskIntervalMs > 0 && relayConfig.authMethod !== "none") {
-    setInterval(async () => {
+    pendingIntervals.push(setInterval(async () => {
       try {
         const result = await multiVenue.run();
         const totalSignals = result.venues.reduce((s, v) => s + v.signals_found, 0);
@@ -224,7 +225,7 @@ async function main() {
       } catch (err) {
         logger.warn({ err }, "Trading desk scan failed");
       }
-    }, tradingDeskIntervalMs);
+    }, tradingDeskIntervalMs));
     logger.info({ interval_ms: tradingDeskIntervalMs }, "Trading desk auto-scan active");
   }
 
@@ -369,9 +370,10 @@ async function main() {
     } catch (err) { logger.warn({ err }, "Failed to produce MARKET_REPORT signal"); }
   };
 
-  // Graceful shutdown — close SSE and Redis before exit
+  // Graceful shutdown — close SSE, Redis, and background intervals before exit
   const origStop = scheduler.stop.bind(scheduler);
   scheduler.stop = async (signal?: string) => {
+    for (const handle of pendingIntervals) clearInterval(handle);
     signalPublisher.closeSseClients();
     await signalPublisher.close();
     await origStop(signal);

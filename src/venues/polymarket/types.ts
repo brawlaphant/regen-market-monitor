@@ -33,6 +33,10 @@ export interface ScoredMarket {
   liquidity: number;
   category?: string;
   source?: string;
+  /** CLOB condition token ID for the relevant outcome (YES or NO token) */
+  tokenId?: string;
+  /** Bid-ask spread as a fraction (e.g., 0.03 = 3%) */
+  spread?: number;
 }
 
 /** Category patterns for market classification */

@@ -37,6 +37,8 @@ export interface MarketInfoLike {
   longsPayShorts: boolean;
   longInterestUsd: bigint;
   shortInterestUsd: bigint;
+  /** Pool value (max estimate) — used for utilization/APY estimation */
+  poolValueMax?: bigint;
 }
 
 /** Minimal shape of what we use from GmxSdk — avoids hard import for testability */
@@ -264,7 +266,7 @@ export async function scanGmPools(
 
       // Estimate utilization from OI vs pool value
       const totalOI = Number(market.longInterestUsd ?? 0n) + Number(market.shortInterestUsd ?? 0n);
-      const poolValue = Number((market as any).poolValueMax ?? 0n);
+      const poolValue = Number(market.poolValueMax ?? 0n);
       if (poolValue <= 0) continue;
 
       const utilization = totalOI / poolValue;

@@ -93,7 +93,7 @@ async function main(): Promise<void> {
         }),
         signal: AbortSignal.timeout(10_000),
       });
-    } catch { /* non-critical */ }
+    } catch (tgErr) { logger.warn({ err: tgErr instanceof Error ? tgErr.message : String(tgErr) }, "Telegram summary send failed"); }
   }
 
   if (totalErrors > 0) {

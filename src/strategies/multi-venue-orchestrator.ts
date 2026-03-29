@@ -67,12 +67,6 @@ export class MultiVenueOrchestrator {
   private surplus: SurplusRouter;
   private dataDir: string;
 
-  private dailyCap: number;
-  private hlPct: number;
-  private polyPct: number;
-  private gmxPct: number;
-  private regenPct: number;
-
   constructor(
     scorer: LitcreditScorer,
     surplus: SurplusRouter,
@@ -83,12 +77,6 @@ export class MultiVenueOrchestrator {
     this.surplus = surplus;
     this.dataDir = dataDir;
     this.logger = logger;
-
-    this.dailyCap = parseFloat(process.env.TRADING_DESK_DAILY_CAP || "150");
-    this.hlPct = parseFloat(process.env.TRADING_DESK_HL_PCT || "25") / 100;
-    this.polyPct = parseFloat(process.env.TRADING_DESK_POLY_PCT || "30") / 100;
-    this.gmxPct = parseFloat(process.env.TRADING_DESK_GMX_PCT || "25") / 100;
-    this.regenPct = parseFloat(process.env.TRADING_DESK_REGEN_PCT || "20") / 100;
   }
 
   /** Run all venue strategies and return combined results.
