@@ -17,6 +17,9 @@ import type { SignalPerformanceTracker } from "./backtest/signal-performance-tra
 import type { WalletRegistry } from "./chain/whale/wallet-registry.js";
 import type { MovementDetector } from "./chain/whale/movement-detector.js";
 import type { PatternAnalyzer } from "./chain/whale/pattern-analyzer.js";
+import type { McpToolSurface } from "./mcp/tools.js";
+import type { RelayClient } from "./litcoin/relay-client.js";
+import type { SurplusRouter } from "./surplus/surplus-router.js";
 
 /**
  * HTTP server exposing health, state, signal, and tuning endpoints.
@@ -50,6 +53,10 @@ export class HealthServer {
   public walletRegistry: WalletRegistry | null = null;
   public movementDetector: MovementDetector | null = null;
   public patternAnalyzer: PatternAnalyzer | null = null;
+  /** Multi-venue trading, set from index.ts */
+  public mcpTools: McpToolSurface | null = null;
+  public relayClient: RelayClient | null = null;
+  public surplusRouter: SurplusRouter | null = null;
 
   /** Signal infrastructure — set from index.ts after init */
   public signalStore: SignalStore | null = null;
@@ -194,6 +201,32 @@ export class HealthServer {
         return;
       }
 
+      // Litcoin / multi-venue routes
+      if (req.url === "/litcoin/burns" && this.relayClient) {
+        this.jsonResponse(res, 200, this.relayClient.getBurnStats());
+        return;
+      }
+      if (req.url === "/litcoin/relay" && this.relayClient) {
+        const h = this.relayClient.getLastHealth();
+        this.jsonResponse(res, h ? 200 : 503, h || { error: "no health check yet" });
+        return;
+      }
+      if (req.url === "/trading/pnl" && this.surplusRouter) {
+        this.jsonResponse(res, 200, { today: this.surplusRouter.getTodayPnl(), state: this.surplusRouter.getState() });
+        return;
+      }
+      if (req.url === "/trading/surplus" && this.surplusRouter) {
+        this.jsonResponse(res, 200, this.surplusRouter.calculateSurplus());
+        return;
+      }
+      if (this.mcpTools) {
+        const mUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+        if (mUrl.pathname === "/mcp/tools") {
+          this.jsonResponse(res, 200, this.mcpTools.getTools().map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })));
+          return;
+        }
+      }
+
       if (req.url === "/health") {
         this.handleHealth(res);
       } else if (req.url === "/state") {
@@ -249,6 +282,23 @@ export class HealthServer {
         },
         signals_published_today: s.signals_published_today,
         last_signal_at: s.last_signal_at,
+      };
+    }
+
+    // Litcoin + trading info
+    if (this.relayClient) {
+      const h = this.relayClient.getLastHealth();
+      body.litcredit = {
+        configured: this.relayClient.isConfigured,
+        relay_reachable: h?.reachable ?? null,
+        providers_online: h?.relay_providers_online ?? null,
+        burns_today: this.relayClient.getBurnStats(),
+      };
+    }
+    if (this.surplusRouter) {
+      body.trading = {
+        pnl_today: this.surplusRouter.getTodayPnl(),
+        surplus: this.surplusRouter.calculateSurplus(),
       };
     }
 

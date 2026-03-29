@@ -196,24 +196,11 @@ export class MultiVenueOrchestrator {
     const config = buildHyperliquidConfig();
 
     try {
-      // Dynamic import — only loads if hyperliquid package is available
-      let Hyperliquid: { new(config: unknown): unknown };
-      try {
-        // @ts-expect-error — hyperliquid is an optional dependency
-        const mod = await import("hyperliquid");
-        Hyperliquid = mod.Hyperliquid || mod.default;
-      } catch {
-        result.errors.push("hyperliquid package not installed — run: npm i hyperliquid");
-        return result;
-      }
+      const { Hyperliquid } = await import("hyperliquid");
 
-      const sdkConfig: Record<string, unknown> = { enableWs: false };
-      if (config.privateKey) sdkConfig.privateKey = config.privateKey;
-      const sdk = new Hyperliquid(sdkConfig) as {
-        connect: () => Promise<void>;
-        disconnect: () => void;
-        info: { perpetuals: { getMetaAndAssetCtxs: () => Promise<unknown[]> } };
-      };
+      const sdkConfig: ConstructorParameters<typeof Hyperliquid>[0] = { enableWs: false };
+      if (config.privateKey) (sdkConfig as Record<string, unknown>).privateKey = config.privateKey;
+      const sdk = new Hyperliquid(sdkConfig);
       await sdk.connect();
 
       try {
