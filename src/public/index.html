@@ -301,7 +301,9 @@ a{color:var(--green);text-decoration:none}a:hover{text-decoration:underline}
 'use strict';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
-const BASE = window.location.origin;
+// Auto-detect proxy prefix: if served from /regen/, route API calls through same prefix
+const _p = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/$/, '');
+const BASE = _p ? window.location.origin + _p : window.location.origin;
 const REFRESH_MS = 30000;
 let sseRetryMs = 3000;
 let signalBuffer = [];

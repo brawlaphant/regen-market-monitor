@@ -41,16 +41,17 @@ See **[src/venues/_template/README.md](src/venues/_template/README.md)** for the
 
 ### Venues we want
 
-These are valuable additions. If you know any of these protocols, pick one and build it.
+**Priority: Base chain.** Our deepest REGEN liquidity is on Base (Hydrex, Aerodrome). With the upcoming Coinstore CEX listing, DEX/CEX arbitrage will be the highest-volume opportunity. Base venues are the #1 contribution target.
 
-| Venue | Chain | Why |
-|---|---|---|
-| **Kujira FIN** | Kujira | Order-book DEX with liquidation bids. Native REGEN/USDC pair is possible. |
-| **Shade Protocol** | Secret Network | Private DeFi with ShadeSwap. Unique because trades are private by default. |
-| **Osmosis CL Pools** | Osmosis | Concentrated liquidity with REGEN/OSMO pool. Fee capture from LP positions. |
-| **Injective** | Injective | On-chain order book perps with zero gas and built-in oracle. |
-| **Astroport** | Neutron | Multi-chain AMM with concentrated liquidity pools. |
-| **Levana** | Osmosis/Sei | Cosmos-native perpetuals with well-funded positions. |
+| Priority | Venue | Chain | Why |
+|---|---|---|---|
+| **P0** | **Coinstore CEX** | Centralized | CEX listing imminent. DEX/CEX arb between Coinstore and Base pools is the biggest near-term opportunity. |
+| **P0** | **Uniswap V3 (Base)** | Base | Concentrated liquidity for REGEN on Base. Deepest on-chain liquidity — primary arb leg. |
+| **P0** | **BaseSwap / SwapBased** | Base | Additional Base DEXes with REGEN pairs. More venues = tighter spreads = more arb profit. |
+| **P1** | **Osmosis CL Pools** | Osmosis | Concentrated liquidity with REGEN/OSMO pool. IBC bridge arb against Base. |
+| **P1** | **Kujira FIN** | Kujira | Order-book DEX with liquidation bids. |
+| **P2** | **Injective** | Injective | On-chain order book perps with zero gas. |
+| **P2** | **Astroport** | Neutron | Multi-chain AMM with concentrated liquidity pools. |
 
 ## How to run tests
 

@@ -181,15 +181,15 @@ tests/unit/
 - **Atomic ledger writes.** Always write to `.tmp` first, then `fs.renameSync`. This prevents corruption.
 - **Dry run by default.** `dryRun` must default to `true`. Nobody should lose money because they forgot a flag.
 
-## Venue ideas
+## Venue ideas — where to start
 
-These are high-value venues that don't have implementations yet:
+**Start with Base chain.** Our deepest REGEN liquidity is on Base (Hydrex, Aerodrome). With an upcoming Coinstore CEX listing, DEX/CEX arbitrage will be the highest-volume, highest-profit opportunity. Base venues are the #1 priority.
 
-| Venue | Chain | Why it's interesting |
-|---|---|---|
-| **Kujira FIN** | Kujira | Order-book DEX, liquidation bids, native REGEN/USDC pair possible |
-| **Shade Protocol** | Secret Network | Private DeFi, ShadeSwap, stkd-SCRT yield |
-| **Osmosis CL Pools** | Osmosis | Concentrated liquidity, REGEN/OSMO pool, fee capture |
-| **Injective** | Injective | Order-book perps, zero gas, built-in oracle |
-| **Astroport** | Terra/Neutron | Multi-chain AMM, PCL pools |
-| **Levana** | Osmosis/Sei | Cosmos-native perps with well-funded positions |
+| Priority | Venue | Chain | Why |
+|---|---|---|---|
+| **P0** | **Coinstore CEX** | Centralized | CEX listing creates DEX/CEX arb. Build an adapter that reads Coinstore order book and compares to Base pool prices. |
+| **P0** | **Uniswap V3 (Base)** | Base | Concentrated liquidity REGEN pairs. Primary on-chain arb leg. |
+| **P0** | **BaseSwap / SwapBased** | Base | More Base DEXes = more arb surface. |
+| **P1** | **Osmosis CL Pools** | Osmosis | CL with REGEN/OSMO. IBC bridge arb against Base. |
+| **P1** | **Kujira FIN** | Kujira | Order-book DEX, liquidation bids. |
+| **P2** | **Injective** | Injective | Order-book perps, zero gas, built-in oracle. |
