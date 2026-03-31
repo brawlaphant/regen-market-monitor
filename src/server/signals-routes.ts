@@ -100,6 +100,12 @@ function handleSseStream(
   });
   res.write(": connected\n\n");
   logger.debug("SSE client connected");
+
+  // Heartbeat every 15s to keep proxy/browser from killing idle connection
+  const heartbeat = setInterval(() => {
+    try { res.write(": heartbeat\n\n"); } catch { clearInterval(heartbeat); }
+  }, 15_000);
+  res.on("close", () => clearInterval(heartbeat));
 }
 
 function handleGetSchema(res: http.ServerResponse): void {

@@ -3,7 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>REGEN Market Monitor</title>
+<title>REGEN Market Monitor — Live Trading Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -15,7 +17,7 @@
   --amber:#ffc048;--amber-dim:rgba(255,192,72,.12);
   --blue:#54a0ff;--blue-dim:rgba(84,160,255,.12);
   --purple:#a855f7;
-  --mono:'SF Mono','Fira Code','Cascadia Code',Consolas,monospace;
+  --mono:'JetBrains Mono','SF Mono','Fira Code',Consolas,monospace;
   --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 }
 html{font-size:14px;background:var(--bg);color:var(--text);font-family:var(--sans);-webkit-font-smoothing:antialiased}
@@ -292,8 +294,8 @@ a{color:var(--green);text-decoration:none}a:hover{text-decoration:underline}
 
 <!-- Footer -->
 <div class="footer">
-  Powered by <a href="https://github.com/ecowealth/regen-market-monitor" target="_blank">regen-market-monitor</a><br>
-  Trading profits fund ecological regeneration
+  Powered by <a href="https://github.com/brawlaphant/regen-market-monitor" target="_blank">regen-market-monitor</a> · <a href="https://github.com/brawlaphant/regen-market-monitor/blob/main/CONTRIBUTING.md" target="_blank">Contribute a venue</a><br>
+  Trading profits fund ecological regeneration · Every trade accumulates REGEN · Surplus retires ecocredits on-chain
 </div>
 
 <script>
@@ -522,12 +524,18 @@ function connectSSE(){
     };
 
     evtSource.onerror = function(){
-      $('sse-status').className = 'conn-status disconnected';
-      $('sse-status').textContent = 'SSE disconnected';
-      try{ evtSource.close(); } catch(ex){}
-      evtSource = null;
-      sseRetryMs = Math.min(sseRetryMs * 1.5, 30000);
-      setTimeout(connectSSE, sseRetryMs);
+      // EventSource fires error on reconnect attempts — only mark disconnected if CLOSED
+      if(!evtSource || evtSource.readyState === 2){
+        $('sse-status').className = 'conn-status disconnected';
+        $('sse-status').textContent = 'SSE disconnected';
+        try{ evtSource.close(); } catch(ex){}
+        evtSource = null;
+        sseRetryMs = Math.min(sseRetryMs * 1.5, 30000);
+        setTimeout(connectSSE, sseRetryMs);
+      } else {
+        $('sse-status').className = 'conn-status connecting';
+        $('sse-status').textContent = 'SSE reconnecting';
+      }
     };
   } catch(e){
     $('sse-status').className = 'conn-status disconnected';
