@@ -248,6 +248,12 @@ export class HealthServer {
         return;
       }
 
+      // DexScreener proxy — browser CSP blocks direct cross-origin fetch
+      if (req.url === "/dexscreener/regen") {
+        this.handleDexScreener(res);
+        return;
+      }
+
       if (req.url === "/health") {
         this.handleHealth(res);
       } else if (req.url === "/state") {
@@ -263,6 +269,20 @@ export class HealthServer {
     this.server.listen(port, () => {
       this.logger.info({ port }, "Health server listening");
     });
+  }
+
+  private async handleDexScreener(res: http.ServerResponse): Promise<void> {
+    try {
+      const dsRes = await fetch("https://api.dexscreener.com/latest/dex/search?q=axlREGEN", { signal: AbortSignal.timeout(10_000) });
+      const dsData = await dsRes.json() as { pairs?: Array<Record<string, unknown>> };
+      const pairs = (dsData.pairs || []).filter((p: Record<string, unknown>) => {
+        const sym = (p.baseToken as Record<string, unknown>)?.symbol as string;
+        return sym === "REGEN" || sym === "axlREGEN";
+      });
+      this.jsonResponse(res, 200, { pairs });
+    } catch {
+      this.jsonResponse(res, 502, { pairs: [], error: "dexscreener_unavailable" });
+    }
   }
 
   private handleHealth(res: http.ServerResponse): void {

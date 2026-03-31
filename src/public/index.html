@@ -212,11 +212,12 @@ a{color:var(--green);text-decoration:none}a:hover{text-decoration:underline;opac
           <th>Price</th>
           <th>Liquidity</th>
           <th>Volume 24h</th>
-          <th class="col-conf">Confidence</th>
+          <th style="width:70px"></th>
         </tr>
       </thead>
       <tbody id="liq-body"></tbody>
     </table>
+    <div id="liq-total" style="font-family:var(--mono);font-size:.65rem;color:var(--text2);margin-top:8px;text-align:right">Loading DexScreener data...</div>
   </div>
 
   <!-- Arb scanner -->
@@ -280,14 +281,18 @@ let sseRetry = 3000;
 let signals = [];
 const MAX_SIG = 80;
 
-// ─── Hardcoded REGEN Markets ─────────────────────────────────────────────────
-const MARKETS = [
-  { id:'hydrex_base', venue:'Hydrex', chain:'Base', color:'#0052FF', link:'https://hydrex.fi' },
-  { id:'aerodrome_base', venue:'Aerodrome', chain:'Base', color:'#0052FF', link:'https://aerodrome.finance' },
-  { id:'osmosis', venue:'Osmosis', chain:'Osmosis', color:'#5E12A0', link:'https://app.osmosis.zone/?from=OSMO&to=REGEN' },
-  { id:'regen_native', venue:'Regen Marketplace', chain:'Regen', color:'#00d68f', link:'https://app.regen.network/projects' },
-  { id:'coingecko', venue:'CoinGecko', chain:'Aggregated', color:'#8DC63F', link:'https://www.coingecko.com/en/coins/regen' },
-  { id:'coinstore', venue:'Coinstore', chain:'CEX', color:'#F7931A', link:'https://www.coinstore.com' }
+// ─── REGEN Markets — DexScreener fills live data ────────────────────────────
+// Static registry of known venues. DexScreener API provides live price/vol/liq.
+const CHAIN_COLORS = { Base:'#0052FF', Osmosis:'#5E12A0', Celo:'#FCFF52', Polygon:'#8247E5', Regen:'#00d68f', CEX:'#F7931A', Aggregated:'#8DC63F' };
+// DexScreener data fetched via server-side proxy at /dexscreener/regen to avoid CSP block
+
+// We'll populate this dynamically from DexScreener + static fallbacks
+let ALL_PAIRS = [];
+const STATIC_MARKETS = [
+  { id:'regen_retire', venue:'ecoBridge Retirement', chain:'Regen', color:CHAIN_COLORS.Regen, link:'https://bridge.eco', note:'Retire ecocredits' },
+  { id:'regen_compute', venue:'Regen Compute Credits', chain:'Regen', color:CHAIN_COLORS.Regen, link:'https://compute.regen.network', note:'Agent-friendly retirement' },
+  { id:'coinstore', venue:'Coinstore', chain:'CEX', color:CHAIN_COLORS.CEX, link:'https://www.coinstore.com', note:'Coming Soon' },
+  { id:'coingecko', venue:'CoinGecko', chain:'Aggregated', color:CHAIN_COLORS.Aggregated, link:'https://www.coingecko.com/en/coins/regen', note:'Price aggregator' },
 ];
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
@@ -471,67 +476,111 @@ function renderSignals(){
   $('sig-count').textContent=signals.length+' signals';
 }
 
-// ─── Liquidity Map ───────────────────────────────────────────────────────────
-function renderLiqMap(venues){
-  var liveMap = {};
-  if(venues){
-    for(var i=0;i<venues.length;i++){
-      var v=venues[i];
-      liveMap[v.venue]=v;
-    }
-  }
+// ─── Liquidity Map — DexScreener powered ────────────────────────────────────
+var dexPairs = [];
 
+async function refreshDexScreener(){
+  var data = await api('/dexscreener/regen');
+  if(!data || !data.pairs) return;
+  dexPairs = data.pairs;
+  renderLiqMap();
+}
+
+function chainColor(chainId){
+  var m = {base:'#0052FF',osmosis:'#5E12A0',celo:'#FCFF52',polygon:'#8247E5'};
+  return m[chainId] || '#6b7d8f';
+}
+
+function chainName(chainId){
+  var m = {base:'Base',osmosis:'Osmosis',celo:'Celo',polygon:'Polygon'};
+  return m[chainId] || chainId;
+}
+
+function renderLiqMap(){
   var body=$('liq-body');
   var html='';
-  var liveCount=0;
+  var totalLiq=0, totalVol=0, pairCount=0;
 
-  for(var m=0;m<MARKETS.length;m++){
-    var mk=MARKETS[m];
-    var live=liveMap[mk.id];
-    if(live) liveCount++;
-    var isCoinstore = mk.id==='coinstore';
+  // Sort: highest liquidity first
+  var sorted = dexPairs.slice().sort(function(a,b){
+    return (b.liquidity?.usd||0) - (a.liquidity?.usd||0);
+  });
 
-    html+='<tr>';
+  for(var i=0;i<sorted.length;i++){
+    var p=sorted[i];
+    var base=p.baseToken||{};
+    var quote=p.quoteToken||{};
+    var liq=p.liquidity?.usd||0;
+    var vol=p.volume?.h24||0;
+    var chain=p.chainId||'';
+    var dex=p.dexId||'';
+    var cc=chainColor(chain);
+    var url=p.url||'#';
 
-    // Venue cell
+    totalLiq+=liq; totalVol+=vol; pairCount++;
+
+    // Best bid highlight
+    var isBest = i===0 && liq > 0;
+
+    html+='<tr'+(isBest?' style="background:var(--green-glow)"':'')+'>';
+
+    // Venue
     html+='<td><div class="venue-cell">';
-    html+='<span class="chain-badge" style="background:'+mk.color+'22;color:'+mk.color+';border:1px solid '+mk.color+'33">'+mk.chain+'</span>';
-    html+='<a href="'+mk.link+'" target="_blank" class="venue-link">'+mk.venue+'</a>';
-    if(isCoinstore) html+=' <span class="coming-soon">Coming Soon</span>';
-    if(live && live.venue===( venues && venues.length > 0 ? getBestBid(venues) : '')) html+='<span class="best-tag">Best Bid</span>';
+    html+='<span class="chain-badge" style="background:'+cc+'22;color:'+cc+';border:1px solid '+cc+'33">'+chainName(chain)+'</span>';
+    html+='<a href="'+url+'" target="_blank" class="venue-link">'+esc(dex.charAt(0).toUpperCase()+dex.slice(1))+'</a>';
+    html+='<span style="color:var(--text3);font-size:.6rem;margin-left:6px">'+esc(base.symbol)+'/'+esc(quote.symbol)+'</span>';
+    if(isBest) html+='<span class="best-tag">Deepest</span>';
     html+='</div></td>';
 
     // Price
-    html+='<td style="color:#fff;font-weight:500">'+(live && live.price_usd ? '$'+Number(live.price_usd).toFixed(4) : '<span style="color:var(--text3)">--</span>')+'</td>';
+    html+='<td style="color:#fff;font-weight:500">$'+Number(p.priceUsd||0).toFixed(4)+'</td>';
 
     // Liquidity
-    html+='<td>'+(live && live.liquidity_usd ? fmt$(live.liquidity_usd,0) : '<span style="color:var(--text3)">--</span>')+'</td>';
+    html+='<td>'+fmt$(liq,0)+'</td>';
 
-    // Volume
-    html+='<td>'+(live && live.volume_24h_usd ? fmt$(live.volume_24h_usd,0) : '<span style="color:var(--text3)">--</span>')+'</td>';
+    // Volume 24h
+    html+='<td>'+fmt$(vol,0)+'</td>';
 
-    // Confidence
-    html+='<td class="col-conf">'+(live && live.confidence ? '<span style="color:var(--green)">'+live.confidence+'</span>' : '<span style="color:var(--text3)">--</span>')+'</td>';
+    // DEX link
+    html+='<td><a href="'+url+'" target="_blank" style="color:var(--green);font-size:.65rem">Trade &rarr;</a></td>';
 
     html+='</tr>';
   }
 
+  // Static markets (retirement, Coinstore, CoinGecko)
+  for(var s=0;s<STATIC_MARKETS.length;s++){
+    var sm=STATIC_MARKETS[s];
+    html+='<tr>';
+    html+='<td><div class="venue-cell">';
+    html+='<span class="chain-badge" style="background:'+sm.color+'22;color:'+sm.color+';border:1px solid '+sm.color+'33">'+sm.chain+'</span>';
+    html+='<a href="'+sm.link+'" target="_blank" class="venue-link">'+sm.venue+'</a>';
+    if(sm.note) html+='<span style="color:var(--text3);font-size:.6rem;margin-left:6px">'+sm.note+'</span>';
+    html+='</div></td>';
+    html+='<td><span style="color:var(--text3)">--</span></td>';
+    html+='<td><span style="color:var(--text3)">--</span></td>';
+    html+='<td><span style="color:var(--text3)">--</span></td>';
+    html+='<td><a href="'+sm.link+'" target="_blank" style="color:var(--green);font-size:.65rem">Visit &rarr;</a></td>';
+    html+='</tr>';
+  }
+
   body.innerHTML=html;
-  $('hero-venues').textContent=liveCount+' / '+MARKETS.length;
+  $('hero-venues').textContent=pairCount+' pairs';
+  $('hero-liq').textContent=fmt$(totalLiq,0);
+  // Update hero volume too
+  if(totalVol > 0) $('hero-vol').textContent=fmt$(totalVol,0);
+  $('liq-total').textContent='Total: '+fmt$(totalLiq,0)+' liquidity across '+pairCount+' pairs on '+countChains(sorted)+' chains';
 }
 
-function getBestBid(venues){
-  var best=null, bestP=0;
-  for(var i=0;i<venues.length;i++){
-    if(venues[i].price_usd>bestP){ bestP=venues[i].price_usd; best=venues[i].venue; }
-  }
-  return best;
+function countChains(pairs){
+  var s={}; for(var i=0;i<pairs.length;i++) s[pairs[i].chainId]=1;
+  return Object.keys(s).length;
 }
 
 // ─── Data Refresh ────────────────────────────────────────────────────────────
 async function refreshAll(){
   await Promise.all([
     refreshCrossChain(),
+    refreshDexScreener(),
     refreshHistory(),
     refreshHealth(),
     refreshPnl(),
@@ -563,8 +612,7 @@ async function refreshCrossChain(){
   // 24h change from /state
   refreshState();
 
-  // Liquidity map
-  renderLiqMap(venues);
+  // Liquidity map now powered by DexScreener (refreshDexScreener handles it)
 
   // Arb banner
   var arb=data.arbitrage_opportunity;
