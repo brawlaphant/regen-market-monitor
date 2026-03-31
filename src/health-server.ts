@@ -1,4 +1,7 @@
 import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { HealthResponse, MarketSnapshot } from "./types.js";
 import type { Logger } from "./logger.js";
 import { handleSignalRoutes } from "./server/signals-routes.js";
@@ -219,12 +222,30 @@ export class HealthServer {
         this.jsonResponse(res, 200, this.surplusRouter.calculateSurplus());
         return;
       }
+      if (req.url === "/retirement/stats" && this.surplusRouter) {
+        this.jsonResponse(res, 200, this.surplusRouter.getRetirementStatsResponse());
+        return;
+      }
       if (this.mcpTools) {
         const mUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
         if (mUrl.pathname === "/mcp/tools") {
           this.jsonResponse(res, 200, this.mcpTools.getTools().map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })));
           return;
         }
+      }
+
+      if (req.url === "/" || req.url === "/index.html") {
+        const __dirname = path.dirname(fileURLToPath(import.meta.url));
+        const htmlPath = path.join(__dirname, "public", "index.html");
+        try {
+          const html = fs.readFileSync(htmlPath, "utf-8");
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(html);
+        } catch {
+          res.writeHead(500);
+          res.end("Dashboard not found");
+        }
+        return;
       }
 
       if (req.url === "/health") {
@@ -300,6 +321,7 @@ export class HealthServer {
         pnl_today: this.surplusRouter.getTodayPnl(),
         surplus: this.surplusRouter.calculateSurplus(),
       };
+      body.retirement = this.surplusRouter.getRetirementStats();
     }
 
     res.writeHead(200, { "Content-Type": "application/json" });

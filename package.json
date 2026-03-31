@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "build": "tsc",
+    "build": "tsc && cp -r src/public dist/public",
     "lint": "eslint src/",
     "test": "vitest run",
     "test:watch": "vitest",

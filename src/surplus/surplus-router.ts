@@ -11,6 +11,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Logger } from "../logger.js";
+import { RetirementAttribution } from "./retirement-attribution.js";
+import type { RetirementRecord, RetirementStats, RetirementStatsResponse } from "./retirement-attribution.js";
 
 export interface VenuePnl {
   venue: string;
@@ -32,6 +34,8 @@ export interface SurplusAllocation {
   available_surplus_usd: number;
   routed_to_regen_usd: number;
   reason: string;
+  /** Attribution memo to include in on-chain retirement tx, if surplus triggers a retirement */
+  retirement_memo?: string;
 }
 
 export class SurplusRouter {
@@ -40,6 +44,7 @@ export class SurplusRouter {
   private state: PnlState;
   private surplusFloor: number;
   private surplusPct: number;
+  private _attribution: RetirementAttribution;
 
   constructor(dataDir: string, logger: Logger) {
     this.logger = logger;
@@ -47,6 +52,12 @@ export class SurplusRouter {
     this.surplusFloor = parseFloat(process.env.TRADING_DESK_SURPLUS_FLOOR || "50");
     this.surplusPct = parseFloat(process.env.TRADING_DESK_SURPLUS_PCT || "20") / 100;
     this.state = this.loadState();
+    this._attribution = new RetirementAttribution(dataDir, logger);
+  }
+
+  /** Access the retirement attribution tracker */
+  get attribution(): RetirementAttribution {
+    return this._attribution;
   }
 
   /** Record P&L from a venue run */
@@ -93,22 +104,48 @@ export class SurplusRouter {
       available_surplus_usd: surplus,
       routed_to_regen_usd: toRoute,
       reason: `${(this.surplusPct * 100).toFixed(0)}% of $${surplus.toFixed(2)} surplus → $${toRoute.toFixed(2)} to REGEN`,
+      retirement_memo: this._attribution.generateMemo({ usd_value: toRoute }),
     };
   }
 
   /** Mark surplus as routed (after successful REGEN accumulation).
-   *  Guards against double-routing: amount is capped at what calculateSurplus() would suggest. */
-  markRouted(amount: number): void {
+   *  Guards against double-routing: amount is capped at what calculateSurplus() would suggest.
+   *  Returns the attribution memo to include in any resulting retirement tx. */
+  markRouted(amount: number): string | null {
     const calc = this.calculateSurplus();
     const capped = Math.min(amount, calc.routed_to_regen_usd);
     if (capped <= 0) {
       this.logger.warn({ requested: amount, available: calc.routed_to_regen_usd }, "markRouted called with no available surplus — skipping");
-      return;
+      return null;
     }
     this.state.cumulative_surplus_routed_usd += capped;
     this.state.last_updated = new Date().toISOString();
     this.saveState();
-    this.logger.info({ amount: capped, total_routed: this.state.cumulative_surplus_routed_usd }, "Surplus routed to REGEN");
+
+    const memo = this._attribution.generateMemo({ usd_value: capped });
+    this.logger.info(
+      { amount: capped, total_routed: this.state.cumulative_surplus_routed_usd, memo },
+      "Surplus routed to REGEN with attribution"
+    );
+    return memo;
+  }
+
+  /**
+   * Record a completed retirement funded by surplus.
+   * Call this after the on-chain retirement tx succeeds.
+   */
+  recordRetirement(record: Omit<RetirementRecord, "id" | "memo">): RetirementRecord {
+    return this._attribution.recordRetirement(record);
+  }
+
+  /** Get retirement attribution stats. */
+  getRetirementStats(): RetirementStats {
+    return this._attribution.getStats();
+  }
+
+  /** Get full retirement stats response for HTTP endpoint. */
+  getRetirementStatsResponse(): RetirementStatsResponse {
+    return this._attribution.getStatsResponse(this.state.cumulative_surplus_routed_usd);
   }
 
   /** Get current P&L state */
