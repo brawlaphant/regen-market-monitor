@@ -342,6 +342,21 @@ export class Scheduler {
 
     const elapsed = Date.now() - cycleStart;
 
+    // Cross-chain price fallback: if MCP failed to get price, use cross-chain aggregator
+    if (!this.plugin.lastPrice && this.crossChainAggregator?.getLastSnapshot()) {
+      const cc = this.crossChainAggregator.getLastSnapshot()!;
+      if (cc.weighted_price_usd > 0) {
+        this.logger.info({ source: "cross-chain", price: cc.weighted_price_usd }, "Using cross-chain price as MCP fallback");
+        this.plugin.lastPrice = {
+          price_usd: cc.weighted_price_usd,
+          change_24h: 0,
+          volume_24h: cc.venues.reduce((s: number, v: any) => s + v.volume_24h_usd, 0),
+          market_cap: 0,
+          timestamp: cc.timestamp,
+        };
+      }
+    }
+
     const snapshot = this.plugin.buildSnapshot(anomaly, liquidity, retirement, curation, elapsed);
     this.store.saveSnapshot(snapshot);
     this.health.snapshot = snapshot;
