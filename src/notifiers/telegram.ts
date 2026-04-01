@@ -26,12 +26,11 @@ export class TelegramNotifier {
     this.logger = logger;
 
     if (config.telegramBotToken && config.telegramChatId) {
-      // Enable polling if admin chat ID is set (for command handler)
-      const polling = !!config.telegramAdminChatId;
-      this.bot = new TelegramBot(config.telegramBotToken, { polling });
+      // Send-only: polling disabled to avoid 409 conflict with ecowealth-api command center
+      this.bot = new TelegramBot(config.telegramBotToken, { polling: false });
       this.chatId = config.telegramChatId;
       this.useFallback = false;
-      this.logger.info({ polling }, "Telegram notifier configured");
+      this.logger.info({ polling: false }, "Telegram notifier configured (send-only)");
     } else {
       this.useFallback = true;
       this.logger.warn(
