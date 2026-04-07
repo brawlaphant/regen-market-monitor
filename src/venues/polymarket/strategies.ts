@@ -14,6 +14,7 @@ import type { LitcreditScorer } from "../../scoring/litcredit-provider.js";
 import type { PolymarketClient } from "./client.js";
 import type { PolymarketMarket, ScoredMarket } from "./types.js";
 import { categorizeMarket } from "./types.js";
+import { kellySize, signalToKellyInput, isDeadPolymarket } from "../../execution/trading-risk.js";
 
 // ── Thresholds ─────────────────────────────────────────────────────
 
@@ -26,14 +27,31 @@ const CLOSER_MIN_LIQ = 100_000;
 
 // ── Sizing ─────────────────────────────────────────────────────────
 
+/**
+ * Kelly-informed bet sizing for prediction markets.
+ * Divergence = edge. Clamped to [minBet, maxBet].
+ */
 export function computeBetSize(
   divergence: number,
   threshold: number,
   minBet: number,
   maxBet: number
 ): number {
-  const t = Math.min(1, Math.max(0, (Math.abs(divergence) - threshold) / 0.35));
-  return Math.round((minBet + t * (maxBet - minBet)) * 100) / 100;
+  const absDiv = Math.abs(divergence);
+  if (absDiv < threshold) return minBet;
+
+  const ki = signalToKellyInput("spray", { divergence });
+  const dailyBankroll = 50; // regen-market-monitor default
+  const kellySized = kellySize({ edge: ki.edge, confidence: ki.confidence, bankroll: dailyBankroll, maxPct: 0.30 });
+  return Math.round(Math.min(maxBet, Math.max(minBet, kellySized)) * 100) / 100;
+}
+
+/** Filter dead markets (price <10% or >90%) */
+export function filterDead(markets: Array<{ tokens?: Array<{ price?: number }> }>): typeof markets {
+  return markets.filter(m => {
+    const price = m.tokens?.[0]?.price ?? 0.5;
+    return !isDeadPolymarket(price);
+  });
 }
 
 // ── Strategies ─────────────────────────────────────────────────────

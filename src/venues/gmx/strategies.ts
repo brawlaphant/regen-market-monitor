@@ -11,6 +11,7 @@
 
 import type { Logger } from "../../logger.js";
 import type { GmxSignal, GmxConfig } from "./types.js";
+import { kellySize, signalToKellyInput } from "../../execution/trading-risk.js";
 
 // ─── SDK type mirrors (match @gmx-io/sdk actual return shapes) ───────
 
@@ -127,7 +128,9 @@ export async function scanFunding(
 
       // Positive signedRate = longs pay shorts → short to collect
       const direction = signedRate > 0 ? ("short" as const) : ("long" as const);
-      const size = Math.min(config.maxPosition, config.dailyCap * 0.3);
+      const ki = signalToKellyInput("funding", { fundingAnnualized: annualized });
+      const kellyS = kellySize({ edge: ki.edge, confidence: ki.confidence, bankroll: config.dailyCap, maxPct: 0.30 });
+      const size = Math.min(config.maxPosition, kellyS);
 
       signals.push({
         market: market.marketTokenAddress,
@@ -207,7 +210,9 @@ export async function scanMomentum(
       if (Math.abs(imbalance) < config.momentumThreshold) continue;
 
       const direction = imbalance > 0 ? ("long" as const) : ("short" as const);
-      const size = Math.min(config.maxPosition, config.dailyCap * 0.25);
+      const ki = signalToKellyInput("momentum", { momentumPct: imbalance });
+      const kellyS = kellySize({ edge: ki.edge, confidence: ki.confidence, bankroll: config.dailyCap, maxPct: 0.25 });
+      const size = Math.min(config.maxPosition, kellyS);
 
       signals.push({
         market: market.marketTokenAddress,

@@ -41,6 +41,14 @@ import {
   buildGmxConfig,
 } from "../venues/gmx/index.js";
 import type { GmxSignal } from "../venues/gmx/types.js";
+import {
+  scanParentLedger,
+  loadLedger as baseEcoLoadLedger,
+  saveLedger as baseEcoSaveLedger,
+  buildConfig as buildBaseEcoConfig,
+  recordSignalGeneration,
+} from "../venues/base-ecowealth/index.js";
+import type { BaseEcowealthSignal } from "../venues/base-ecowealth/types.js";
 
 export interface VenueResult {
   venue: string;
@@ -85,10 +93,11 @@ export class MultiVenueOrchestrator {
     const results: VenueResult[] = [];
 
     // Run all venues in parallel
-    const [polyResult, hlResult, gmxResult] = await Promise.allSettled([
+    const [polyResult, hlResult, gmxResult, baseEcoResult] = await Promise.allSettled([
       this.runPolymarket(),
       this.runHyperliquid(),
       this.runGmx(),
+      this.runBaseEcowealth(),
     ]);
 
     const rejectMsg = (reason: unknown): string =>
@@ -104,6 +113,9 @@ export class MultiVenueOrchestrator {
 
     if (gmxResult.status === "fulfilled") results.push(gmxResult.value);
     else results.push(emptyResult("gmx", gmxResult.reason));
+
+    if (baseEcoResult.status === "fulfilled") results.push(baseEcoResult.value);
+    else results.push(emptyResult("base-ecowealth", baseEcoResult.reason));
 
     // Record P&L for each venue
     for (const r of results) {
@@ -280,6 +292,45 @@ export class MultiVenueOrchestrator {
     } catch (err) {
       result.errors.push(err instanceof Error ? err.message : String(err));
       this.logger.warn({ err }, "GMX venue run failed");
+    }
+
+    return result;
+  }
+
+  private async runBaseEcowealth(): Promise<VenueResult> {
+    const result: VenueResult = {
+      venue: "base-ecowealth",
+      signals_found: 0,
+      trades_executed: 0,
+      spent_usd: 0,
+      realized_pnl: 0,
+      errors: [],
+    };
+
+    const config = buildBaseEcoConfig();
+
+    try {
+      const signals = await scanParentLedger(config);
+      result.signals_found = signals.length;
+
+      // Record signal generation to ledger
+      if (signals.length > 0) {
+        const pnl = signals[0]?.metrics.pnl_24h || 0;
+        const gas = signals[0]?.metrics.gas_spent_24h || 0;
+        recordSignalGeneration(signals.length, pnl, gas, 0, 0);
+      }
+
+      this.logger.info(
+        { signals: signals.length, confidence_threshold: config.confidenceThreshold },
+        "Base EcoWealth scan complete"
+      );
+
+      // Signal-only for now — execution adapter would go here
+      // When wired to parent wallet, this would trigger REGEN buys on surplus
+
+    } catch (err) {
+      result.errors.push(err instanceof Error ? err.message : String(err));
+      this.logger.warn({ err }, "Base EcoWealth venue run failed");
     }
 
     return result;

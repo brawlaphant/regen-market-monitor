@@ -10,6 +10,7 @@
 
 import type { Logger } from "../../logger.js";
 import type { HyperliquidSignal, HyperliquidConfig } from "./types.js";
+import { kellySize, signalToKellyInput } from "../../execution/trading-risk.js";
 
 /**
  * Scan funding rates across all Hyperliquid perpetuals.
@@ -44,7 +45,9 @@ export async function scanFunding(
     if (Math.abs(annualized) < config.fundingThreshold) continue;
 
     const direction = funding > 0 ? ("short" as const) : ("long" as const);
-    const size = Math.min(config.maxPosition, config.dailyCap * 0.3);
+    const ki = signalToKellyInput("funding", { fundingAnnualized: annualized });
+    const kellyS = kellySize({ edge: ki.edge, confidence: ki.confidence, bankroll: config.dailyCap, maxPct: 0.30 });
+    const size = Math.min(config.maxPosition, kellyS);
 
     signals.push({
       coin,
@@ -97,7 +100,9 @@ export async function scanMomentum(
     if (Math.abs(change) < config.momentumThreshold) continue;
 
     const direction = change > 0 ? ("long" as const) : ("short" as const);
-    const size = Math.min(config.maxPosition, config.dailyCap * 0.25);
+    const ki = signalToKellyInput("momentum", { momentumPct: change });
+    const kellyS = kellySize({ edge: ki.edge, confidence: ki.confidence, bankroll: config.dailyCap, maxPct: 0.25 });
+    const size = Math.min(config.maxPosition, kellyS);
 
     signals.push({
       coin,
